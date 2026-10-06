@@ -42,7 +42,7 @@ console.log('[4/5] 写入 systemd 服务与部署说明...')
 fs.writeFileSync(
   path.join(stageApp, 'bq.service'),
   `[Unit]
-Description=ZZK Board (zhongzhuan kanban)
+Description=BQ Board (baiqu inventory, port 8792)
 After=network-online.target
 Wants=network-online.target
 

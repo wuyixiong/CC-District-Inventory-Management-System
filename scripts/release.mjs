@@ -1,11 +1,11 @@
 /**
  * 一键发布到服务器：npm run release
  * 前提（一次性配置，见 git发布指南.md）：
- *   1. 服务器已建 bare 仓库 ~/git/zzk-release.git 并装好 post-receive 钩子
+ *   1. 服务器已建 bare 仓库 ~/git/bq-release.git 并装好 post-receive 钩子
  *   2. Windows 已配 ssh 免密登录服务器（ssh-copy-id）
  * 流程：构建前端/后端 → 组装产物（不含 data/，服务器配置与台账永不覆盖）
  *      → 写 VERSION(源码 commit) → 提交发布快照 → push 触发服务器自动部署+重启
- * 服务器验证：cat /opt/zzk/VERSION && journalctl -u zzk -f
+ * 服务器验证：cat /opt/bq/VERSION && journalctl -u bq -f
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -13,11 +13,11 @@ import { execSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 // ===== 按实际环境修改这里 =====
-const PROD = 'jyb@192.168.0.104:git/zzk-release.git' // 服务器 bare 仓库（ssh 地址:路径，路径相对家目录）
+const PROD = 'jyb@192.168.0.104:git/bq-release.git' // 服务器 bare 仓库（ssh 地址:路径，路径相对家目录）
 // ==============================
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const work = path.join(root, '分发包', 'zzk-release-work')
+const work = path.join(root, '分发包', 'bq-release-work')
 const run = (cmd, opts = {}) => execSync(cmd, { stdio: 'inherit', shell: true, ...opts })
 const out = (cmd, opts = {}) => execSync(cmd, { shell: true, ...opts }).toString().trim()
 
@@ -49,4 +49,4 @@ run('git branch -M main', { cwd: work })
 console.log('[4/4] 推送到服务器（触发自动部署）...')
 run(`git push -f ${PROD} main`, { cwd: work })
 console.log(`\n发布完成：${hash} ${subject}`)
-console.log('服务器验证：cat /opt/zzk/VERSION && journalctl -u zzk -f')
+console.log('服务器验证：cat /opt/bq/VERSION && journalctl -u bq -f')
