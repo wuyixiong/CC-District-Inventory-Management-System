@@ -1,0 +1,16 @@
+{
+  "name": "baiqu-inventory-board",
+  "version": "1.0.0",
+  "private": true,
+  "description": "白区库存管理 · 库位看板（快照台账 + 停放时长 + 超龄预警，独立部署端口 8792）",
+  "scripts": {
+    "setup": "npm --prefix backend install && npm --prefix frontend install",
+    "build": "npm --prefix frontend run build",
+    "start": "npm --prefix backend start",
+    "dev": "npm --prefix backend run dev",
+    "dev:web": "npm --prefix frontend run dev",
+    "seed": "npm --prefix backend run seed",
+    "reset": "npm --prefix backend run reset",
+    "release": "node scripts/release.mjs"
+  }
+}

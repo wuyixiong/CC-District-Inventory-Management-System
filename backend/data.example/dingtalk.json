@@ -1,0 +1,11 @@
+{
+  "appKey": "",
+  "appSecret": "",
+  "operatorId": "",
+  "baseId": "",
+  "sheet": "出入库流水表",
+  "autoSyncMinutes": 2,
+  "mirror": true,
+  "corpId": "",
+  "agentId": ""
+}

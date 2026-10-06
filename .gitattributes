@@ -1,0 +1,2 @@
+# Linux 脚本必须保持 LF，否则在服务器上执行会报 bad interpreter
+*.sh text eol=lf

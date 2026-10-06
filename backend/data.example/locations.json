@@ -1,0 +1,254 @@
+[
+  {
+    "code": "A01",
+    "zone": "A区",
+    "note": "",
+    "enabled": true
+  },
+  {
+    "code": "A02",
+    "zone": "A区",
+    "note": "",
+    "enabled": true
+  },
+  {
+    "code": "A03",
+    "zone": "A区",
+    "note": "",
+    "enabled": true
+  },
+  {
+    "code": "A04",
+    "zone": "A区",
+    "note": "",
+    "enabled": true
+  },
+  {
+    "code": "A05",
+    "zone": "A区",
+    "note": "",
+    "enabled": true
+  },
+  {
+    "code": "A06",
+    "zone": "A区",
+    "note": "",
+    "enabled": true
+  },
+  {
+    "code": "A07",
+    "zone": "A区",
+    "note": "",
+    "enabled": true
+  },
+  {
+    "code": "A08",
+    "zone": "A区",
+    "note": "",
+    "enabled": true
+  },
+  {
+    "code": "A09",
+    "zone": "A区",
+    "note": "",
+    "enabled": true
+  },
+  {
+    "code": "A10",
+    "zone": "A区",
+    "note": "",
+    "enabled": true
+  },
+  {
+    "code": "A11",
+    "zone": "A区",
+    "note": "",
+    "enabled": true
+  },
+  {
+    "code": "A12",
+    "zone": "A区",
+    "note": "",
+    "enabled": true
+  },
+  {
+    "code": "A13",
+    "zone": "A区",
+    "note": "",
+    "enabled": true
+  },
+  {
+    "code": "A14",
+    "zone": "A区",
+    "note": "",
+    "enabled": true
+  },
+  {
+    "code": "B01",
+    "zone": "B区",
+    "note": "",
+    "enabled": true
+  },
+  {
+    "code": "B02",
+    "zone": "B区",
+    "note": "",
+    "enabled": true
+  },
+  {
+    "code": "B03",
+    "zone": "B区",
+    "note": "",
+    "enabled": true
+  },
+  {
+    "code": "B04",
+    "zone": "B区",
+    "note": "",
+    "enabled": true
+  },
+  {
+    "code": "B05",
+    "zone": "B区",
+    "note": "",
+    "enabled": true
+  },
+  {
+    "code": "B06",
+    "zone": "B区",
+    "note": "",
+    "enabled": true
+  },
+  {
+    "code": "B07",
+    "zone": "B区",
+    "note": "",
+    "enabled": true
+  },
+  {
+    "code": "B08",
+    "zone": "B区",
+    "note": "",
+    "enabled": true
+  },
+  {
+    "code": "B09",
+    "zone": "B区",
+    "note": "",
+    "enabled": true
+  },
+  {
+    "code": "B10",
+    "zone": "B区",
+    "note": "",
+    "enabled": true
+  },
+  {
+    "code": "B11",
+    "zone": "B区",
+    "note": "",
+    "enabled": true
+  },
+  {
+    "code": "B12",
+    "zone": "B区",
+    "note": "",
+    "enabled": true
+  },
+  {
+    "code": "B13",
+    "zone": "B区",
+    "note": "",
+    "enabled": true
+  },
+  {
+    "code": "B14",
+    "zone": "B区",
+    "note": "",
+    "enabled": true
+  },
+  {
+    "code": "C01",
+    "zone": "C区",
+    "note": "",
+    "enabled": true
+  },
+  {
+    "code": "C02",
+    "zone": "C区",
+    "note": "",
+    "enabled": true
+  },
+  {
+    "code": "C03",
+    "zone": "C区",
+    "note": "",
+    "enabled": true
+  },
+  {
+    "code": "C04",
+    "zone": "C区",
+    "note": "",
+    "enabled": true
+  },
+  {
+    "code": "C05",
+    "zone": "C区",
+    "note": "",
+    "enabled": true
+  },
+  {
+    "code": "C06",
+    "zone": "C区",
+    "note": "",
+    "enabled": true
+  },
+  {
+    "code": "C07",
+    "zone": "C区",
+    "note": "",
+    "enabled": true
+  },
+  {
+    "code": "C08",
+    "zone": "C区",
+    "note": "",
+    "enabled": true
+  },
+  {
+    "code": "C09",
+    "zone": "C区",
+    "note": "",
+    "enabled": true
+  },
+  {
+    "code": "C10",
+    "zone": "C区",
+    "note": "",
+    "enabled": true
+  },
+  {
+    "code": "C11",
+    "zone": "C区",
+    "note": "",
+    "enabled": true
+  },
+  {
+    "code": "C12",
+    "zone": "C区",
+    "note": "",
+    "enabled": true
+  },
+  {
+    "code": "C13",
+    "zone": "C区",
+    "note": "",
+    "enabled": true
+  },
+  {
+    "code": "C14",
+    "zone": "C区",
+    "note": "",
+    "enabled": true
+  }
+]
