@@ -24,6 +24,32 @@ interface ZoneGroup {
   locs: LocationView[]
 }
 
+// 白区分节排序：楼层降序、层内 C→B→A（现场平面图顺序：4C→4B→4A→3C→…）；
+// 非「数字+字母+区域」命名的分区排在其后按字典序。库位号自然排序（1B2 在 1B10 前）。
+function cmpZone(a: string, b: string): number {
+  const ka = a.match(/^(\d)([A-Z])区域$/)
+  const kb = b.match(/^(\d)([A-Z])区域$/)
+  if (ka && kb) {
+    if (ka[1] !== kb[1]) return Number(kb[1]) - Number(ka[1])
+    return 'CBA'.indexOf(ka[2]) - 'CBA'.indexOf(kb[2])
+  }
+  if (ka) return -1
+  if (kb) return 1
+  return a.localeCompare(b, 'zh')
+}
+
+function cmpLocCode(a: string, b: string): number {
+  const pa = a.match(/^(\d)([A-Z])(\d{1,2})(.*)$/)
+  const pb = b.match(/^(\d)([A-Z])(\d{1,2})(.*)$/)
+  if (pa && pb) {
+    if (pa[1] !== pb[1]) return Number(pb[1]) - Number(pa[1])
+    if (pa[2] !== pb[2]) return 'CBA'.indexOf(pa[2]) - 'CBA'.indexOf(pb[2])
+    if (Number(pa[3]) !== Number(pb[3])) return Number(pa[3]) - Number(pb[3])
+    return (pa[4] || '').localeCompare(pb[4] || '')
+  }
+  return a.localeCompare(b)
+}
+
 const zoneGroups = computed<ZoneGroup[]>(() => {
   const b = board.value
   if (!b) return []
@@ -42,7 +68,7 @@ const zoneGroups = computed<ZoneGroup[]>(() => {
     if (!groups.has(zone)) groups.set(zone, [])
     groups.get(zone)!.push(loc)
   }
-  return [...groups.entries()].map(([zone, locs]) => ({ zone, locs })).sort((a, b2) => a.zone.localeCompare(b2.zone))
+  return [...groups.entries()].map(([zone, locs]) => ({ zone, locs })).sort((a, b2) => cmpZone(a.zone, b2.zone))
 })
 
 const statCounts = computed(() => {
@@ -323,12 +349,12 @@ interface LocGroup<T> {
 }
 function groupByZone<T extends { code: string; zone: string }>(list: T[]): LocGroup<T>[] {
   const groups = new Map<string, T[]>()
-  for (const l of [...list].sort((a, b) => a.code.localeCompare(b.code))) {
+  for (const l of [...list].sort(cmpLocCode)) {
     const z = l.zone || '未分区'
     if (!groups.has(z)) groups.set(z, [])
     groups.get(z)!.push(l)
   }
-  return [...groups.entries()].map(([zone, items]) => ({ zone, items })).sort((a, b) => a.zone.localeCompare(b.zone))
+  return [...groups.entries()].map(([zone, items]) => ({ zone, items })).sort((a, b) => cmpZone(a.zone, b.zone))
 }
 const enabledByZone = computed(() => groupByZone(enabledLocations.value))
 const occupiedByZone = computed(() => groupByZone(occupiedLocations.value))

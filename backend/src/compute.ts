@@ -119,6 +119,20 @@ export function replayState(events: LedgerEvent[]): { state: Map<string, StockIt
   return { state, lastEvent }
 }
 
+/** 库位号自然排序：白区编号无补零（1b2 会排在 1b10 前才算对），楼层降序、层内 C→B→A、序号升序；
+ *  非该结构（如 A01）退回字典序。区域节的前后顺序由前端 zoneGroups 决定，这里只保证节内顺序。 */
+export function cmpLocCode(a: string, b: string): number {
+  const pa = a.match(/^(\d)([A-Z])(\d{1,2})(.*)$/)
+  const pb = b.match(/^(\d)([A-Z])(\d{1,2})(.*)$/)
+  if (pa && pb) {
+    if (pa[1] !== pb[1]) return Number(pb[1]) - Number(pa[1])
+    if (pa[2] !== pb[2]) return 'CBA'.indexOf(pa[2]) - 'CBA'.indexOf(pb[2])
+    if (Number(pa[3]) !== Number(pb[3])) return Number(pa[3]) - Number(pb[3])
+    return (pa[4] || '').localeCompare(pb[4] || '')
+  }
+  return a.localeCompare(b)
+}
+
 export function boardFromState(
   state: Map<string, StockItem>,
   lastEvent: LedgerEvent | null,
@@ -141,7 +155,7 @@ export function boardFromState(
   }
   const codes = new Set<string>([...locMap.keys(), ...byLoc.keys()])
   const locViews: LocationView[] = []
-  for (const code of [...codes].sort()) {
+  for (const code of [...codes].sort(cmpLocCode)) {
     const l = locMap.get(code)
     const its = (byLoc.get(code) ?? []).sort((a, b) => b.days - a.days)
     const qty = its.reduce((s, i) => s + i.qty, 0)

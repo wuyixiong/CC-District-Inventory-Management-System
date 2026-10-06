@@ -456,10 +456,10 @@ let recorderCache: { at: number; names: string[] } | null = null
 /**
  * 把钉钉表「库位编号」单选选项自动登记进本地库位表——记一笔下拉、看板空位、
  * 同步校验、二维码标签从此直接可用，不用再手工批量导入 132 个库位。
- * 只增不删不改：本地已停用/改过区域的不会被覆盖，表里删掉的选项本地保留（历史数据仍在）。
- * 库位号 = 选项名规范化（与同步读取同规则：取首 token 转大写）；
- * 区域 = 选项名最后一段「-」后的描述（如 1b1-半成品→半成品、3b2-hf1-补涂烘房→补涂烘房），
- * 尾段是 hf 编号（如 2c3-hf21）或没有横线时归入「白区」，可在设置页表格里改。
+ * 只增不删：本地已停用的不会被重新启用，表里删掉的选项本地保留（历史数据仍在）。
+ * 区域 = 楼层条带前缀（1B1-半成品→1B区域、3b2-hf1-补涂烘房→3B区域），看板按
+ * 「楼层降序、层内 C→B→A」分节（现场平面图顺序）；每次同步把前缀类库位的区域
+ * 对齐成前缀规则（设置页手改区域会被校正回来——分组口径以楼层为准）。
  */
 export async function syncLocationsFromTable(): Promise<number> {
   const fields = await getFields()
@@ -470,18 +470,40 @@ export async function syncLocationsFromTable(): Promise<number> {
   }
   const list: LocationItem[] = readLocations()
   const have = new Set(list.map((l) => l.code))
+  let changed = false
   let added = 0
   for (const raw of names) {
     const code = locCode(raw)
     if (!code || have.has(code)) continue
-    const tail = raw.includes('-') ? raw.slice(raw.lastIndexOf('-') + 1).trim() : ''
-    const zone = tail && !/^hf/i.test(tail) ? tail.slice(0, 20) : '白区'
-    list.push({ code, zone, note: '', enabled: true })
+    list.push({ code, zone: zoneOfCode(code, raw), note: '', enabled: true })
     have.add(code)
     added++
+    changed = true
   }
-  if (added) writeLocations(list)
+  // 存量区域校正：编号带楼层条带前缀的，区域统一为「前缀区域」（如 4B区域）
+  for (const l of list) {
+    const strip = floorStripOf(l.code)
+    if (strip && l.zone !== `${strip}区域`) {
+      l.zone = `${strip}区域`
+      changed = true
+    }
+  }
+  if (changed) writeLocations(list)
   return added
+}
+
+/** 库位号 → 楼层条带前缀（如 1B1-半成品→1B）；编号不含该结构时返回 '' */
+function floorStripOf(code: string): string {
+  const m = code.match(/^(\d[A-Z])\d/)
+  return m ? m[1] : ''
+}
+
+/** 新登记库位的区域：有楼层条带前缀用「前缀区域」，否则用名称末段（无 hf 后缀时），兜底「白区」 */
+function zoneOfCode(code: string, raw: string): string {
+  const strip = floorStripOf(code)
+  if (strip) return `${strip}区域`
+  const tail = raw.includes('-') ? raw.slice(raw.lastIndexOf('-') + 1).trim() : ''
+  return tail && !/^hf/i.test(tail) ? tail.slice(0, 20) : '白区'
 }
 
 export async function readOptions(): Promise<DtOptions> {
