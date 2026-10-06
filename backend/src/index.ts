@@ -229,7 +229,7 @@ app.get('/api/locations', (_req: Request, res: Response) => {
 app.post('/api/locations', (req: Request, res: Response) => {
   const { code, zone, note } = req.body ?? {}
   const c = String(code ?? '').trim().toUpperCase()
-  if (!/^[\u4e00-\u9fa5A-Z0-9_-]{1,12}$/.test(c)) return bad(res, '库位号须为 1-12 位字母/数字/横线/下划线/中文，如 1B1-半成品')
+  if (!/^[\u4e00-\u9fa5A-Z0-9_-]{1,16}$/.test(c)) return bad(res, '库位号须为 1-16 位字母/数字/横线/下划线/中文，如 1B1-半成品')
   const list = readLocations()
   if (list.some((l) => l.code === c)) return bad(res, `库位 ${c} 已存在`)
   list.push({ code: c, zone: String(zone ?? '').trim(), note: String(note ?? '').trim(), enabled: true })
@@ -249,7 +249,7 @@ app.post('/api/locations/bulk', (req: Request, res: Response) => {
     if (!line) continue
     const [code, zone, note] = line.split(/[,，\t]/).map((s) => (s ?? '').trim())
     const c = (code ?? '').toUpperCase()
-    if (!/^[\u4e00-\u9fa5A-Z0-9_-]{1,12}$/.test(c) || have.has(c)) {
+    if (!/^[\u4e00-\u9fa5A-Z0-9_-]{1,16}$/.test(c) || have.has(c)) {
       skipped.push(line)
       continue
     }

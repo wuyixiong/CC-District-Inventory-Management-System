@@ -161,7 +161,7 @@ onMounted(loadAll)
   <div class="panel">
     <h3>库位登记</h3>
     <el-table :data="locs" size="small" border>
-      <el-table-column prop="code" label="库位号" width="90" />
+      <el-table-column prop="code" label="库位号" width="130" />
       <el-table-column label="区域" width="140">
         <template #default="scope">
           <el-input v-model="scope.row.zone" size="small" maxlength="20" @change="saveLoc(scope.row)" />
@@ -185,7 +185,7 @@ onMounted(loadAll)
     <div class="muted" style="margin: 8px 0 16px">区域、备注可直接在表格里修改，回车或点其他位置自动保存；停用后不可再录入该库位，历史数据保留。</div>
 
     <div class="toolbar">
-      <el-input v-model="newLoc.code" placeholder="库位号，如 1B1-半成品" style="width: 160px" maxlength="12" />
+      <el-input v-model="newLoc.code" placeholder="库位号，如 1B1-半成品" style="width: 160px" maxlength="16" />
       <el-input v-model="newLoc.zone" placeholder="区域，如 白区" style="width: 120px" maxlength="20" />
       <el-input v-model="newLoc.note" placeholder="备注（可空）" style="width: 200px" maxlength="40" />
       <el-button type="primary" plain @click="addLoc">添加</el-button>

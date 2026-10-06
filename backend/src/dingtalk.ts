@@ -16,7 +16,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import https from 'node:https'
 import crypto from 'node:crypto'
-import { appendMirrorEvent, appendTxnEvent, readLedger, readLocations, type TxnKind } from './store'
+import { appendMirrorEvent, appendTxnEvent, readLedger, readLocations, writeLocations, type LocationItem, type TxnKind } from './store'
 import { replayState } from './compute'
 
 export interface DingConfig {
@@ -453,7 +453,44 @@ export interface DtOptions {
 
 let recorderCache: { at: number; names: string[] } | null = null
 
+/**
+ * 把钉钉表「库位编号」单选选项自动登记进本地库位表——记一笔下拉、看板空位、
+ * 同步校验、二维码标签从此直接可用，不用再手工批量导入 132 个库位。
+ * 只增不删不改：本地已停用/改过区域的不会被覆盖，表里删掉的选项本地保留（历史数据仍在）。
+ * 库位号 = 选项名规范化（与同步读取同规则：取首 token 转大写）；
+ * 区域 = 选项名最后一段「-」后的描述（如 1b1-半成品→半成品、3b2-hf1-补涂烘房→补涂烘房），
+ * 尾段是 hf 编号（如 2c3-hf21）或没有横线时归入「白区」，可在设置页表格里改。
+ */
+export async function syncLocationsFromTable(): Promise<number> {
+  const fields = await getFields()
+  const names: string[] = []
+  for (const c of fields['库位编号']?.property?.choices ?? []) {
+    const raw = (typeof c === 'string' ? c : String(c?.name ?? '')).split('\t')[0].trim()
+    if (raw) names.push(raw)
+  }
+  const list: LocationItem[] = readLocations()
+  const have = new Set(list.map((l) => l.code))
+  let added = 0
+  for (const raw of names) {
+    const code = locCode(raw)
+    if (!code || have.has(code)) continue
+    const tail = raw.includes('-') ? raw.slice(raw.lastIndexOf('-') + 1).trim() : ''
+    const zone = tail && !/^hf/i.test(tail) ? tail.slice(0, 20) : '白区'
+    list.push({ code, zone, note: '', enabled: true })
+    have.add(code)
+    added++
+  }
+  if (added) writeLocations(list)
+  return added
+}
+
 export async function readOptions(): Promise<DtOptions> {
+  // 顺手把表里的库位选项登记进本地（记一笔下拉/看板空位直接可用）；失败不影响选项返回
+  try {
+    await syncLocationsFromTable()
+  } catch {
+    /* 钉钉不可用/未配置时跳过 */
+  }
   // 钉钉字段选项可能存在同名重复（历史误建），重复值会破坏前端下拉的过滤注册，
   // 这里按名称去重（保留首次出现顺序）
   const seen = new Set<string>()
@@ -684,6 +721,13 @@ export async function syncFromDingtalk(): Promise<SyncReport> {
   const state0 = configState()
   if (!state0.configured) throw new Error(`钉钉配置不完整，缺：${state0.missing.join('、')}`)
   const cfg = readConfig()
+
+  // 表里新加的库位选项先登记进本地（否则含新库位的行会被「未登记」跳过）；失败不阻塞同步
+  try {
+    await syncLocationsFromTable()
+  } catch {
+    /* 字段读取失败（网络/权限）时按现有登记继续 */
+  }
 
   // 0) 补写此前没写进钉钉的网页记一笔（钉钉故障/未配置恢复后自动追平）
   const ledger0 = readLedger()
