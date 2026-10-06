@@ -558,7 +558,7 @@ async function submitQuick() {
                   class="zone-slot-occupancy-tag" size="small" type="danger" effect="dark"
                   title="该库位已停用"
                   @click="openDetail(loc)"
-                >已停用</el-tag>
+                >{{ loc.note === '不可存放区' ? '不可存放' : '已停用' }}</el-tag>
                 <el-tag
                   v-else
                   class="zone-slot-occupancy-tag" size="small" :type="loc.batches > 0 ? 'success' : 'info'" effect="light"

@@ -428,12 +428,15 @@ function deriveBatch(at: string): string {
   return `${at.slice(5, 7)}${at.slice(8, 10)}-${at.slice(11, 13)}${at.slice(14, 16)}`
 }
 
-/** 库位选项名容错：钉钉单选选项可能带区域尾巴（如 "A06\tA区"），只取编号 token */
+/** 库位选项名容错：取编号 token 转大写；同一物理库位在表里可能有多个烘房子位选项
+ *  （4c3-hf1/hf2/hf13-补涂烘房），统一折叠为基础码（楼层条带+序号）：4C3-HF1-补涂烘房 → 4C3 */
 function locCode(raw: string): string {
-  return String(raw ?? '')
+  const token = String(raw ?? '')
     .split(/[\t,，;；\s]+/)[0]
     .trim()
     .toUpperCase()
+  const m = token.match(/^(\d[A-Z]\d{1,2})(?:[-\u4e00-\u9fa5].*)?$/)
+  return m ? m[1] : token
 }
 
 function nowLocal(): string {
@@ -454,56 +457,99 @@ export interface DtOptions {
 let recorderCache: { at: number; names: string[] } | null = null
 
 /**
- * 把钉钉表「库位编号」单选选项自动登记进本地库位表——记一笔下拉、看板空位、
- * 同步校验、二维码标签从此直接可用，不用再手工批量导入 132 个库位。
- * 只增不删：本地已停用的不会被重新启用，表里删掉的选项本地保留（历史数据仍在）。
- * 区域 = 楼层条带前缀（1B1-半成品→1B区域、3b2-hf1-补涂烘房→3B区域），看板按
- * 「楼层降序、层内 C→B→A」分节（现场平面图顺序）；每次同步把前缀类库位的区域
- * 对齐成前缀规则（设置页手改区域会被校正回来——分组口径以楼层为准）。
+ * 把钉钉表「库位编号」单选选项对齐进本地库位表——记一笔下拉、看板格位、
+ * 同步校验、二维码标签全部由此驱动。物理模型：库位 = 楼层条带+序号（如 4C3）。
+ * - 同一库位的多个子位选项（4c3-hf1/hf2/hf13-补涂烘房）合并为一条登记，原始名放备注；
+ * - 表里出现的每条带固定补齐 1~14 格：缺的序号（如 4C1、1B2）登记为停用 + 备注「不可存放区」；
+ * - 区域 = 楼层条带前缀（1B1→1B区域），看板按楼层降序、层内 C→B→A 分节；
+ * - 只增不删：本地停用不会被重新启用，表里删掉的选项本地保留（历史数据仍在）；
+ *   备注仅在创建时写入，设置页改过的备注不覆盖；区域每次按前缀规则校正。
  */
 export async function syncLocationsFromTable(): Promise<number> {
   const fields = await getFields()
-  const names: string[] = []
+  // 基础码 → 该库位在表里的原始选项名（去重保序）
+  const byBase = new Map<string, string[]>()
   for (const c of fields['库位编号']?.property?.choices ?? []) {
     const raw = (typeof c === 'string' ? c : String(c?.name ?? '')).split('\t')[0].trim()
-    if (raw) names.push(raw)
-  }
-  const list: LocationItem[] = readLocations()
-  const have = new Set(list.map((l) => l.code))
-  let changed = false
-  let added = 0
-  for (const raw of names) {
     const code = locCode(raw)
-    if (!code || have.has(code)) continue
-    list.push({ code, zone: zoneOfCode(code, raw), note: '', enabled: true })
-    have.add(code)
-    added++
-    changed = true
+    if (!code) continue
+    if (!byBase.has(code)) byBase.set(code, [])
+    if (!byBase.get(code)!.includes(raw)) byBase.get(code)!.push(raw)
   }
-  // 存量区域校正：编号带楼层条带前缀的，区域统一为「前缀区域」（如 4B区域）
-  for (const l of list) {
-    const strip = floorStripOf(l.code)
-    if (strip && l.zone !== `${strip}区域`) {
-      l.zone = `${strip}区域`
+  const prev = readLocations()
+  const kept = new Map<string, LocationItem>()
+  let changed = false
+  for (const l of prev) {
+    const base = locCode(l.code)
+    if (kept.has(base)) {
+      changed = true // 折叠后重码：同一物理库位只留一条
+      continue
+    }
+    if (base !== l.code) {
+      l.code = base
+      changed = true
+    }
+    kept.set(base, l)
+  }
+  let added = 0
+  for (const [base, raws] of byBase) {
+    const zone = zoneOfCode(base)
+    const exist = kept.get(base)
+    if (!exist) {
+      kept.set(base, { code: base, zone, note: noteOfRaws(base, raws), enabled: true })
+      added++
+      changed = true
+    } else {
+      if (exist.zone !== zone) {
+        exist.zone = zone
+        changed = true
+      }
+      if (!exist.note) {
+        exist.note = noteOfRaws(base, raws)
+        changed = true
+      }
+    }
+  }
+  // 条带补格：表里有选项的条带（及本地启用的条带）固定 1~14，缺号=不可存放区
+  const strips = new Set<string>()
+  for (const base of byBase.keys()) {
+    const s = floorStripOf(base)
+    if (s) strips.add(s)
+  }
+  for (const l of kept.values()) {
+    if (!l.enabled) continue
+    const s = floorStripOf(l.code)
+    if (s) strips.add(s)
+  }
+  for (const s of strips) {
+    for (let n = 1; n <= 14; n++) {
+      const code = `${s}${n}`
+      if (kept.has(code)) continue
+      kept.set(code, { code, zone: `${s}区域`, note: '不可存放区', enabled: false })
       changed = true
     }
   }
-  if (changed) writeLocations(list)
+  if (changed) writeLocations([...kept.values()])
   return added
 }
 
-/** 库位号 → 楼层条带前缀（如 1B1-半成品→1B）；编号不含该结构时返回 '' */
+/** 库位号 → 楼层条带前缀（如 1B1→1B）；编号不含该结构时返回 '' */
 function floorStripOf(code: string): string {
   const m = code.match(/^(\d[A-Z])\d/)
   return m ? m[1] : ''
 }
 
-/** 新登记库位的区域：有楼层条带前缀用「前缀区域」，否则用名称末段（无 hf 后缀时），兜底「白区」 */
-function zoneOfCode(code: string, raw: string): string {
-  const strip = floorStripOf(code)
-  if (strip) return `${strip}区域`
-  const tail = raw.includes('-') ? raw.slice(raw.lastIndexOf('-') + 1).trim() : ''
-  return tail && !/^hf/i.test(tail) ? tail.slice(0, 20) : '白区'
+/** 库位区域：有楼层条带前缀用「前缀区域」（1B1→1B区域），否则兜底「白区」 */
+function zoneOfCode(code: string): string {
+  const s = floorStripOf(code)
+  return s ? `${s}区域` : '白区'
+}
+
+/** 库位备注：原始选项名去掉基础码前缀后的描述（如 hf1-补涂烘房），多个子位用 / 合并 */
+function noteOfRaws(base: string, raws: string[]): string {
+  const tails = [...new Set(raws.map((r) => r.replace(new RegExp(`^${base}`, 'i'), '').replace(/^[-－]/, '')))]
+    .filter(Boolean)
+  return tails.join('/').slice(0, 40)
 }
 
 export async function readOptions(): Promise<DtOptions> {
@@ -619,6 +665,19 @@ function choiceId(field: any, value: string): string {
   return ''
 }
 
+/** 库位专用选项匹配：在 choiceId 基础上加基础码兜底——本地库位是折叠后的基础码（如 4C3），
+ *  表里对应多个子位选项（4c3-hf1/hf13-…），取第一个匹配（同一物理库位，回写行落在该子位下） */
+function choiceIdLoc(field: any, value: string): string {
+  const direct = choiceId(field, value)
+  if (direct) return direct
+  for (const c of field?.property?.choices ?? []) {
+    const name = typeof c === 'string' ? c : String(c.name ?? '')
+    const id = typeof c === 'string' ? '' : String(c.id ?? '')
+    if (locCode(name) === value) return id || name
+  }
+  return ''
+}
+
 function atToMs(at: string): number {
   const t = Date.parse(String(at).replace(' ', 'T'))
   return Number.isFinite(t) ? t : Date.now()
@@ -644,7 +703,7 @@ export async function writeTxnToDingtalk(ev: WebTxnInput): Promise<string[]> {
   }
   const inId = choiceId(fields['操作类型'], '入库')
   const outId = choiceId(fields['操作类型'], '出库')
-  const locId = choiceId(fields['库位编号'], ev.location)
+  const locId = choiceIdLoc(fields['库位编号'], ev.location)
   if (!locId) throw new Error(`库位 ${ev.location} 不在钉钉表「库位编号」选项中`)
   const prodId = choiceId(fields['产品图号'], ev.product)
   if (!prodId) throw new Error(`产品图号 ${ev.product} 不在钉钉表选项中，请先在钉钉表添加该图号选项`)
@@ -658,7 +717,7 @@ export async function writeTxnToDingtalk(ev: WebTxnInput): Promise<string[]> {
 
   const rows: { fields: Record<string, unknown> }[] = []
   if (ev.kind === 'move') {
-    const targetId = choiceId(fields['库位编号'], ev.targetLocation ?? '')
+    const targetId = choiceIdLoc(fields['库位编号'], ev.targetLocation ?? '')
     if (!targetId) throw new Error(`目标库位 ${ev.targetLocation} 不在钉钉表「库位编号」选项中`)
     if (!outId || !inId) throw new Error('钉钉表「操作类型」缺少 入库/出库 选项，无法写入转移')
     rows.push({ fields: { ...base, 操作类型: outId, 备注: `${remark} 转移至 ${ev.targetLocation}` } })
