@@ -236,15 +236,27 @@ body {
     cursor: pointer;
 }
 
-/* 库位备注行：单行显示（子位名/不可存放区等），超长省略，悬停看全文 */
-.zone-slot-note {
-    margin-top: 2px;
-    font-size: 10px;
-    line-height: 1.4;
+.zone-slot-empty-text {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    font-size: 13px;
     color: var(--text-color-secondary);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.64), rgba(248, 250, 252, 0.9)),
+        repeating-linear-gradient(
+            135deg,
+            rgba(148, 163, 184, 0.06) 0,
+            rgba(148, 163, 184, 0.06) 10px,
+            rgba(255, 255, 255, 0) 10px,
+            rgba(255, 255, 255, 0) 20px
+        );
+    border-radius: var(--border-radius-small);
+    border: 1px dashed rgba(0, 0, 0, 0.08);
+    padding: 12px 8px;
+    line-height: 1.7;
 }
 
 /* 批次迷你格：一格一个批次，颜色即状态 */

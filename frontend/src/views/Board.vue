@@ -546,7 +546,7 @@ async function submitQuick() {
               @click="openDetail(loc)"
             >
               <div class="zone-slot-header" @click.stop>
-                <div class="zone-slot-number">{{ loc.code }}</div>
+                <div class="zone-slot-number">{{ loc.code }}<span v-if="loc.note" style="font-weight: 400; font-size: 10px"> · {{ loc.note }}</span></div>
                 <el-tag
                   v-if="!loc.registered"
                   class="zone-slot-occupancy-tag" size="small" type="danger" effect="dark"
@@ -554,17 +554,22 @@ async function submitQuick() {
                   @click="openDetail(loc)"
                 >未登记</el-tag>
                 <el-tag
-                  v-else-if="loc.batches > 0"
-                  class="zone-slot-occupancy-tag" size="small" type="success" effect="light"
+                  v-else-if="!loc.enabled"
+                  class="zone-slot-occupancy-tag" size="small" type="danger" effect="dark"
+                  title="该库位已停用"
+                  @click="openDetail(loc)"
+                >{{ loc.note === '不可存放区' ? '不可存放' : '已停用' }}</el-tag>
+                <el-tag
+                  v-else
+                  class="zone-slot-occupancy-tag" size="small" :type="loc.batches > 0 ? 'success' : 'info'" effect="light"
                   :title="`查看 ${loc.code} 全部批次明细`"
                   @click="openDetail(loc)"
-                >库存 {{ loc.batches }} 批 · {{ loc.qty }} 件</el-tag>
+                >{{ loc.batches > 0 ? `库存 ${loc.batches} 批 · ${loc.qty} 件` : '空闲' }}</el-tag>
               </div>
 
-              <div v-if="loc.note || !loc.enabled" class="zone-slot-note" :title="loc.note || '已停用'">{{ loc.note || '已停用' }}</div>
-
               <template v-if="loc.batches > 0">
-                <div class="slot-mini-grid">                  <template v-for="cell in miniCells(loc)" :key="cell.product + '|' + cell.batch">
+                <div class="slot-mini-grid">
+                  <template v-for="cell in miniCells(loc)" :key="cell.product + '|' + cell.batch">
                     <el-popover placement="top" trigger="hover" :width="300" popper-class="mini-cart-hover-popper">
                       <div class="mini-cart-hover-panel">
                         <div class="cart-title-text">{{ itemLabel(cell) }}</div>
@@ -596,6 +601,7 @@ async function submitQuick() {
                   </el-tag>
                 </div>
               </template>
+              <div v-else-if="loc.registered && loc.enabled" class="zone-slot-empty-text">库位空闲</div>
             </div>
           </div>
         </div>
