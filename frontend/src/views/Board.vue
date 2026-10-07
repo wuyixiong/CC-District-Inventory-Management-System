@@ -333,6 +333,7 @@ function queryRecorders(qs: string, cb: (items: { value: string }[]) => void) {
 function openQuick() {
   quick.txnAt = nowStr()
   loadDtOptions()
+  loadLocs() // 库位列表与钉钉选项同策略：每次打开弹窗刷新，加载期一次失败可自愈
   quickVisible.value = true
   // 锁定模式下首次打开时免登可能尚未完成（挂载时静默失败），再试一次并提示原因
   if (recorderLocked.value && !dtIdentity.value && inDingtalk()) refreshIdentity()
@@ -349,7 +350,7 @@ interface LocGroup<T> {
 }
 function groupByZone<T extends { code: string; zone: string }>(list: T[]): LocGroup<T>[] {
   const groups = new Map<string, T[]>()
-  for (const l of [...list].sort(cmpLocCode)) {
+  for (const l of [...list].sort((a, b) => cmpLocCode(a.code, b.code))) {
     const z = l.zone || '未分区'
     if (!groups.has(z)) groups.set(z, [])
     groups.get(z)!.push(l)
