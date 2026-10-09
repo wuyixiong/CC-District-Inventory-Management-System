@@ -402,8 +402,10 @@ watch(
   },
 )
 watch(itemOptions, (opts) => {
-  // 出库/转移默认选停放最久的一项（先进先出），与白区一致
-  if ((quick.kind === 'out' || quick.kind === 'move') && opts.length) {
+  // 出库/转移默认选停放最久的一项（先进先出），与白区一致。
+  // 仅在尚未选择产品时补默认：看板每 30 秒自动刷新会令 itemOptions 重建（新数组引用），
+  // 无条件执行会把用户填到一半的产品/批次/数量打回默认值
+  if ((quick.kind === 'out' || quick.kind === 'move') && opts.length && !quick.product) {
     const first = opts[0]
     quick.product = first.product
     quick.batch = first.batch
