@@ -8,7 +8,7 @@ import Doc from './views/Doc.vue'
 const tabs = [
   { key: 'board', label: '看板' },
   { key: 'settings', label: '设置' },
-  { key: 'doc', label: '口径说明' },
+  { key: 'doc', label: '操作指导' },
 ]
 const tab = ref('board')
 
