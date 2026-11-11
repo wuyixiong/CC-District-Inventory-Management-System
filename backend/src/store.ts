@@ -54,6 +54,7 @@ export interface TxnEvent {
   recordedAt: string // ISO，服务端落账时间
   source?: 'dingtalk' // 录入来源（缺省 = 网页端记一笔）
   sourceId?: string // 来源记录ID（钉钉行ID，同步去重用）
+  groupId?: string // 跨批拆分组ID（网页端一笔跨批出库拆出的多条事件共用，便于追溯）
 }
 
 export type LedgerEvent = DayEvent | TxnEvent | MirrorEvent
@@ -128,6 +129,7 @@ export function appendTxnEvent(t: {
   txnAt: string
   source?: 'dingtalk'
   sourceId?: string
+  groupId?: string
 }): TxnEvent {
   const ev: TxnEvent = {
     seq: nextSeq(),
@@ -144,6 +146,7 @@ export function appendTxnEvent(t: {
     recordedAt: new Date().toISOString(),
     source: t.source,
     sourceId: t.sourceId,
+    groupId: t.groupId,
   }
   fs.mkdirSync(DATA_DIR, { recursive: true })
   fs.appendFileSync(LEDGER, JSON.stringify(ev) + '\n', 'utf8')

@@ -119,6 +119,44 @@ export function replayState(events: LedgerEvent[]): { state: Map<string, StockIt
   return { state, lastEvent }
 }
 
+/** 先进先出扣减的拆分明细：一次跨批出库落在各库位/批次上的件数 */
+export interface FifoPortion {
+  location: string
+  batch: string
+  take: number
+}
+
+/**
+ * 按库位集合 FIFO 扣减（纯状态操作，不落账）：在给定库位范围内收集该产品的在库批次，
+ * 按停放起始日 since 升序（先进先出，与钉钉同步 applyTxn 同口径）依次扣足 qty 件。
+ * 每库位扣掉的必是该库位的 FIFO 前缀，因此与钉钉镜像重放的按库位 FIFO 结果天然一致。
+ * 网页端出库传单库位集合（小区域内跨批一次扣足）。
+ */
+export function fifoTake(
+  state: Map<string, StockItem>,
+  codes: Set<string>,
+  product: string,
+  qty: number,
+): { ok: true; portions: FifoPortion[]; total: number } | { ok: false; total: number } {
+  const matches = [...state.entries()]
+    .filter(([k, v]) => v.qty > 0 && codes.has(k.split('|')[0]) && k.split('|')[1] === product)
+    .sort((a, b) => a[1].since.localeCompare(b[1].since))
+  const total = matches.reduce((s, [, v]) => s + v.qty, 0)
+  if (total < qty) return { ok: false, total }
+  let remaining = qty
+  const portions: FifoPortion[] = []
+  for (const [key, val] of matches) {
+    if (remaining <= 0) break
+    const take = Math.min(val.qty, remaining)
+    const [location, , batch] = key.split('|')
+    portions.push({ location, batch: batch ?? '', take })
+    val.qty -= take
+    remaining -= take
+    if (val.qty <= 0) state.delete(key)
+  }
+  return { ok: true, portions, total }
+}
+
 /** 库位号自然排序：白区编号无补零（1b2 会排在 1b10 前才算对），楼层降序、层内 C→B→A、序号升序；
  *  非该结构（如 A01）退回字典序。区域节的前后顺序由前端 zoneGroups 决定，这里只保证节内顺序。 */
 export function cmpLocCode(a: string, b: string): number {

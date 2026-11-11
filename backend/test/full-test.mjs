@@ -328,6 +328,59 @@ await t('E1 并发 30 笔同时入库：序号唯一、台账完整、数量准�
   eq(new Set(seqs).size, 30, '序号唯一')
 })
 
+console.log(`\n========== G. 库位内跨批出库（先进先出一次扣足） ==========`)
+
+// G1 数据准备：P-ZONE 四批同库位 A05（批次号即入库先后，Z1 停放最久）
+await t('G1 自动出库：同库位 4 批一次出 35 件，按停放最久优先拆批扣减', async () => {
+  await POST('/api/txn', { kind: 'in', location: 'A05', product: 'P-ZONE', batch: 'Z1', qty: 10, recorder: 't', txnAt: T(10, '08:00') })
+  await POST('/api/txn', { kind: 'in', location: 'A05', product: 'P-ZONE', batch: 'Z2', qty: 10, recorder: 't', txnAt: T(8, '08:00') })
+  await POST('/api/txn', { kind: 'in', location: 'A05', product: 'P-ZONE', batch: 'Z3', qty: 10, recorder: 't', txnAt: T(6, '08:00') })
+  await POST('/api/txn', { kind: 'in', location: 'A05', product: 'P-ZONE', batch: 'Z4', qty: 10, recorder: 't', txnAt: T(4, '08:00') })
+  const r = await POST('/api/txn', { kind: 'out', location: 'A05', product: 'P-ZONE', batch: '', qty: 35, recorder: 't', txnAt: T(0, '14:00') })
+  eq(r.status, 200, 'HTTP')
+  assert(r.body.ok, '应成功')
+  const portions = r.body.portions ?? []
+  eq(portions.length, 4, '应拆 4 段')
+  eq(portions.map((p) => `${p.batch}:${p.take}`).join(','), 'Z1:10,Z2:10,Z3:10,Z4:5', '拆分明细应按停放最久优先')
+  eq((r.body.seqs ?? []).length, 4, '应落 4 条流水')
+  const a05 = await findLoc('A05')
+  eq(a05.items.filter((i) => i.product === 'P-ZONE').length, 1, 'A05 只剩 1 批')
+  eq(itemOf(a05, 'P-ZONE', 'Z4').qty, 5, 'A05 仅剩 Z4×5')
+})
+
+await t('G2 自动出库超量 → 400 且注明库位现有件数', async () => {
+  const r = await POST('/api/txn', { kind: 'out', location: 'A05', product: 'P-ZONE', batch: '', qty: 6, recorder: 't', txnAt: T(0) })
+  eq(r.status, 400, 'HTTP')
+  assert(r.body.message.includes('现有 5'), '提示应含库位现有件数，实际：' + r.body.message)
+})
+
+await t('G3 自动出库只扣本库位：他库位同图号不动；单段拆分也返回 portions', async () => {
+  await POST('/api/txn', { kind: 'in', location: 'B01', product: 'P-ZONE', batch: 'Z9', qty: 3, recorder: 't', txnAt: T(2, '08:00') })
+  const r = await POST('/api/txn', { kind: 'out', location: 'A05', product: 'P-ZONE', batch: '', qty: 2, recorder: 't', txnAt: T(0) })
+  eq(r.status, 200, 'HTTP')
+  eq((r.body.portions ?? []).length, 1, '只剩一批应拆 1 段')
+  const b01 = await findLoc('B01')
+  eq(itemOf(b01, 'P-ZONE', 'Z9').qty, 3, 'B01 同图号不受影响')
+  const a05 = await findLoc('A05')
+  eq(itemOf(a05, 'P-ZONE', 'Z4').qty, 3, 'A05 剩 Z4×3')
+})
+
+await t('G4 库位无该产品 / 未传库位 → 400', async () => {
+  const r1 = await POST('/api/txn', { kind: 'out', location: 'C01', product: 'P-ZONE', batch: '', qty: 1, recorder: 't', txnAt: T(0) })
+  eq(r1.status, 400, '空库位无该产品')
+  assert((r1.body.message || '').includes('没有产品'), '提示语')
+  const r2 = await POST('/api/txn', { kind: 'out', product: 'P-ZONE', batch: '', qty: 1, recorder: 't', txnAt: T(0) })
+  eq(r2.status, 400, '缺库位')
+})
+
+await t('G5 指定批次出库不受影响（向后兼容）', async () => {
+  const r = await POST('/api/txn', { kind: 'out', location: 'A05', product: 'P-ZONE', batch: 'Z4', qty: 1, recorder: 't', txnAt: T(0) })
+  eq(r.status, 200, 'HTTP')
+  assert(!r.body.seqs && !r.body.portions, '单批出库不应返回跨批拆分字段')
+  const a05 = await findLoc('A05')
+  eq(itemOf(a05, 'P-ZONE', 'Z4').qty, 2, '指定批余量')
+})
+
 console.log(`\n========== 汇总 ==========`)
 console.log(`通过 ${pass} 项，失败 ${fail} 项`)
 if (failures.length) {

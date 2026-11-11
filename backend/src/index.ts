@@ -15,7 +15,7 @@ import {
   writeSettings,
   type DayRecord,
 } from './store'
-import { boardFromState, buildBoard, replayState } from './compute'
+import { boardFromState, buildBoard, fifoTake, replayState } from './compute'
 import { configState, getUserByAuthCode, issueUserToken, readConfig, readOptions, readStatus, recordSyncError, signJsapi, syncFromDingtalk, verifyUserToken, writeConfig, writeTxnToDingtalk } from './dingtalk'
 import { saveMap } from './dingtalk'
 
@@ -36,6 +36,54 @@ function verifiedRecorder(req: Request): { ok: true; name: string } | { ok: fals
   const name = verifyUserToken((Array.isArray(header) ? header[0] : header) ?? '')
   if (!name) return { ok: false }
   return { ok: true, name: name.slice(0, 20) }
+}
+
+/** 出库自动先进先出（跨批）：在 codes 库位范围内按停放最久优先扣足，拆多条事件落账并回写钉钉、应答 */
+async function fifoOut(
+  res: Response,
+  codes: Set<string>,
+  label: string,
+  prod: string,
+  q: number,
+  rec: string,
+  nt: string | undefined,
+  when: string,
+): Promise<void> {
+  const { state } = replayState(readLedger())
+  const take = fifoTake(state, codes, prod, q)
+  if (!take.ok) {
+    return void bad(
+      res,
+      take.total ? `库存不足：${label} / ${prod} 现有 ${take.total} 件，本次出库 ${q} 件` : `${label} 没有产品 ${prod} 的库存，无法出库`,
+    )
+  }
+  // 一笔跨批出库拆成多条事件（各带真实批次），共享 groupId 便于追溯
+  const groupId = `g${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
+  const evs = take.portions.map((p) =>
+    appendTxnEvent({
+      kind: 'out' as const,
+      location: p.location,
+      product: prod,
+      batch: p.batch,
+      qty: p.take,
+      recorder: rec,
+      note: nt,
+      txnAt: when,
+      groupId,
+    }),
+  )
+  let dtWarning: string | undefined
+  for (const ev of evs) {
+    try {
+      const ids = await writeTxnToDingtalk(ev)
+      saveMap(ev.seq, ids)
+    } catch (e) {
+      dtWarning = (e as Error).message
+      recordSyncError(`网页记一笔 #${ev.seq} 写入钉钉失败：${dtWarning}`)
+      break // 数据性错误（图号/库位不在选项）后续笔同样会失败；未写部分由下次同步自动补写
+    }
+  }
+  res.json({ ok: true, seq: evs[0].seq, seqs: evs.map((e) => e.seq), portions: take.portions, dtWarning })
 }
 
 /** 记一笔：入库/出库/转移，实时流水。出库与转移会校验现有库存；成功后回写钉钉流水。 */
@@ -76,6 +124,10 @@ app.post('/api/txn', async (req: Request, res: Response) => {
 
   if (kind === 'in') {
     if (!registered.has(loc)) return bad(res, `库位 ${loc} 未登记或已停用，请先在设置中登记`)
+  } else if (kind === 'out' && !bat) {
+    // 出库不指定批次 = 自动先进先出：该库位（小区域）下多批一次扣足，按停放最久优先跨批扣减
+    if (!loc) return bad(res, '请选择库位')
+    return await fifoOut(res, new Set([loc]), `库位 ${loc}`, prod, q, rec, nt || undefined, when)
   } else {
     const { state } = replayState(readLedger())
     const cur = state.get(`${loc}|${prod}|${bat}`)

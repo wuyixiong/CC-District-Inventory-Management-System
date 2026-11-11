@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { Refresh, EditPen, Search, Download, Camera } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElNotification } from 'element-plus'
 import { api } from '../api'
 import { inDingtalk, scanCode } from '../utils/scan'
 import { dingtalkLogin, type DtIdentity } from '../utils/auth'
@@ -228,32 +228,89 @@ async function scanToQuery() {
   if (text) queryKeyword.value = text
 }
 
-// 记一笔表单：扫码填库位 / 目标库位 / 产品图号（填完与手工选择完全等价）
-async function scanFill(field: 'location' | 'target' | 'product') {
-  const text = await tryScan()
-  if (!text) return
+// 记一笔表单：扫码结果填充（字段旁扫码按钮与「扫码选类型后的连续扫码」共用，填完与手工选择完全等价）
+function fillScanned(field: 'location' | 'target' | 'product', text: string): boolean {
   if (field === 'location' || field === 'target') {
     const code = text.toUpperCase()
     const pool = field === 'location' ? (quick.kind === 'in' ? enabledLocations.value : occupiedLocations.value) : targetOptions.value
-    if (!pool.some((l) => l.code === code)) return ElMessage.warning(`「${code}」不是可选库位（未登记/已停用/无货），请确认条码内容`)
+    if (!pool.some((l) => l.code === code)) {
+      ElMessage.warning(`「${code}」不是可选库位（未登记/已停用/无货），请确认条码内容`)
+      return false
+    }
     if (field === 'location') quick.location = code
     else quick.targetLocation = code
-    return
+    return true
   }
   if (quick.kind === 'in') {
     quick.product = text
-    return
+    return true
   }
-  if (!quick.location) return ElMessage.warning('请先选库位（或扫库位码），再扫产品码')
+  if (!quick.location) {
+    ElMessage.warning('请先选库位（或扫库位码），再扫产品码')
+    return false
+  }
   const lower = text.toLowerCase()
   const hit = productOptions.value.find((p) => p.toLowerCase() === lower) ?? productOptions.value.find((p) => p.toLowerCase().includes(lower))
-  if (!hit) return ElMessage.warning(`库位 ${quick.location} 没有「${text}」的在库记录`)
+  if (!hit) {
+    ElMessage.warning(`库位 ${quick.location} 没有「${text}」的在库记录`)
+    return false
+  }
   quick.product = hit
-  quick.batch = ''
   quick.qty = 1
-  // 默认选中该图号停放最久的一批（先进先出，与手工选择一致）
-  const first = batchOptions.value.find((b) => b.product === hit)
-  if (first) quick.batch = first.batch
+  // 转移默认选中停放最久的一批（先进先出）；出库批次保持「自动·先进先出（可跨批）」
+  quick.batch = ''
+  if (quick.kind === 'move') {
+    const first = batchOptions.value.find((b) => b.product === hit)
+    if (first) quick.batch = first.batch
+  }
+  return true
+}
+
+async function scanFill(field: 'location' | 'target' | 'product') {
+  const text = await tryScan()
+  if (text) fillScanned(field, text)
+}
+
+/* ===== 主扫码：先选操作类型，再连续扫码记账（查询 = 原扫库位/产品即查） ===== */
+const scanKindVisible = ref(false)
+
+// 选定类型后的连续扫码步骤
+function scanSteps(kind: 'in' | 'out' | 'move'): { field: 'location' | 'target' | 'product'; hint: string }[] {
+  if (kind === 'in')
+    return [
+      { field: 'location', hint: '请扫「入库库位」码' },
+      { field: 'product', hint: '请扫「产品」码（条码内容=图号）' },
+    ]
+  if (kind === 'out')
+    return [
+      { field: 'location', hint: '请扫出库「库位（小区域）」码' },
+      { field: 'product', hint: '请扫「产品」码（条码内容=图号）' },
+    ]
+  return [
+    { field: 'location', hint: '请扫「原库位」码' },
+    { field: 'product', hint: '请扫「产品」码（条码内容=图号）' },
+    { field: 'target', hint: '请扫「目标库位」码' },
+  ]
+}
+
+async function chooseScanKind(kind: 'in' | 'out' | 'move' | 'query') {
+  scanKindVisible.value = false
+  if (kind === 'query') return scanAndRoute()
+  quick.kind = kind
+  resetQuickForm() // 与类型切换 watch 同一套清空逻辑：所选类型未变化时 watch 不触发，这里兜底
+  openQuick()
+  if (!inDingtalk()) {
+    ElMessage.warning('扫码需在手机钉钉内使用；已为你打开表单，可手动填写（字段旁也有扫码小按钮）')
+    return
+  }
+  // 连续扫码引导链：任一步取消/失败即中止，表单保持打开，可手动补或用字段旁扫码按钮
+  for (const step of scanSteps(kind)) {
+    ElMessage.info(step.hint)
+    const text = await tryScan()
+    if (!text) return
+    if (!fillScanned(step.field, text)) return
+  }
+  ElMessage.success('扫码填充完成，请核对「数量」后点「记入台账」')
 }
 
 /* ===== 记一笔（仿白区库存「记一笔」） ===== */
@@ -379,20 +436,25 @@ const productOptions = computed(() => {
 })
 // 所选产品图号下的批次下拉
 const batchOptions = computed(() => itemOptions.value.filter((i) => i.product === quick.product))
-const available = computed(() => batchOptions.value.find((b) => b.batch === quick.batch)?.qty ?? 0)
+// 现有量：出库批次为空 =「自动·先进先出」取该库位该图号总量（可跨批一次出）；否则取所选单批余量
+const available = computed(() => {
+  if (quick.kind === 'out' && !quick.batch) return batchOptions.value.reduce((s, b) => s + b.qty, 0)
+  return batchOptions.value.find((b) => b.batch === quick.batch)?.qty ?? 0
+})
 const targetOptions = computed(() => enabledLocations.value.filter((l) => l.code !== quick.location))
+// 出库批次下拉的具体批选项（无批次号的批与「自动」选项值冲突，由自动模式覆盖扣减，不单独列出）
+const outBatchChoices = computed(() => batchOptions.value.filter((b) => b.batch))
 
-watch(
-  () => quick.kind,
-  () => {
-    quick.location = ''
-    quick.product = ''
-    quick.batch = ''
-    quick.qty = 1
-    quick.targetLocation = ''
-    quick.txnAt = nowStr()
-  },
-)
+// 切换操作类型/扫码选类型时清空表单（类型未变化时 watch 不触发，扫码入口会显式调用）
+function resetQuickForm() {
+  quick.location = ''
+  quick.product = ''
+  quick.batch = ''
+  quick.qty = 1
+  quick.targetLocation = ''
+  quick.txnAt = nowStr()
+}
+watch(() => quick.kind, resetQuickForm)
 watch(
   () => quick.location,
   () => {
@@ -402,13 +464,13 @@ watch(
   },
 )
 watch(itemOptions, (opts) => {
-  // 出库/转移默认选停放最久的一项（先进先出），与白区一致。
+  // 出库/转移默认选停放最久的一项（先进先出），与白区一致；出库批次保持「自动·先进先出（可跨批）」。
   // 仅在尚未选择产品时补默认：看板每 30 秒自动刷新会令 itemOptions 重建（新数组引用），
   // 无条件执行会把用户填到一半的产品/批次/数量打回默认值
   if ((quick.kind === 'out' || quick.kind === 'move') && opts.length && !quick.product) {
     const first = opts[0]
     quick.product = first.product
-    quick.batch = first.batch
+    quick.batch = quick.kind === 'move' ? first.batch : ''
     quick.qty = 1
   }
 })
@@ -433,11 +495,11 @@ async function submitQuick() {
   quickSubmitting.value = true
   try {
     if (!recorderLocked.value) localStorage.setItem('zz_recorder', quick.recorder.trim())
-    // 批次号由操作时间生成（MMDD-HHmm），出库/转移则取所选批次、时间记当前
+    // 批次号：入库由操作时间生成（MMDD-HHmm）；转移取所选批次；出库为空 = 自动先进先出（该库位跨批一次扣足）
     const batch = quick.kind === 'in' ? dayjs(quick.txnAt).format('MMDD-HHmm') : quick.batch
     const txnAt = quick.kind === 'in' ? quick.txnAt : nowStr()
     const postTxn = () =>
-      api<{ seq: number; dtWarning?: string }>('/api/txn', {
+      api<{ seq: number; seqs?: number[]; portions?: { location: string; batch: string; take: number }[]; dtWarning?: string }>('/api/txn', {
         method: 'POST',
         headers: dtIdentity.value ? { 'x-user-token': dtIdentity.value.token } : undefined,
         body: JSON.stringify({
@@ -452,7 +514,7 @@ async function submitQuick() {
           note: quick.note,
         }),
       })
-    let r: { seq: number; dtWarning?: string }
+    let r: { seq: number; seqs?: number[]; portions?: { location: string; batch: string; take: number }[]; dtWarning?: string }
     try {
       r = await postTxn()
     } catch (e) {
@@ -463,9 +525,19 @@ async function submitQuick() {
         throw e
       }
     }
-    ElMessage.success(
-      `已记一笔（#${r.seq}）：${kindLabel.value} ${quick.location}${quick.kind === 'move' ? ' → ' + quick.targetLocation : ''} · ${prod}${batch ? ' / ' + batch : ''} × ${quick.qty}`,
-    )
+    if (r.portions?.length) {
+      // 自动跨批出库：展示按先进先出拆批扣减的明细
+      const detail = r.portions.map((p) => `${p.batch || '无批次号'} × ${p.take}`).join('；')
+      ElNotification.success({
+        title: `已记一笔（#${r.seq}）：出库 ${quick.location} · ${prod} × ${quick.qty}`,
+        message: `按先进先出拆 ${r.portions.length} 批扣减：${detail}`,
+        duration: 8000,
+      })
+    } else {
+      ElMessage.success(
+        `已记一笔（#${r.seq}）：${kindLabel.value} ${quick.location}${quick.kind === 'move' ? ' → ' + quick.targetLocation : ''} · ${prod}${batch ? ' / ' + batch : ''} × ${quick.qty}`,
+      )
+    }
     if (r.dtWarning) {
       ElMessage.warning(`已入本地台账，但写入钉钉流水失败：${r.dtWarning}（下次同步会自动补写，详见设置页）`)
     }
@@ -492,7 +564,7 @@ async function submitQuick() {
       <div class="dashboard-header-left">
         <el-button type="primary" plain :icon="Refresh" :loading="syncing || loading" @click="syncNow()">同步最新数据</el-button>
         <el-button type="success" plain :icon="EditPen" @click="openQuick()">记一笔</el-button>
-        <el-button class="mobile-only" type="success" :icon="Camera" @click="scanAndRoute()">扫码</el-button>
+        <el-button class="mobile-only" type="success" :icon="Camera" @click="scanKindVisible = true">扫码</el-button>
         <el-button type="info" plain :icon="Search" @click="loadDtOptions(); queryVisible = true">产品查询</el-button>
         <el-button type="warning" plain :icon="Download" @click="exportInventory">导出</el-button>
         <span class="auto-playing-indicator">▶ 自动刷新中...</span>
@@ -686,7 +758,7 @@ async function submitQuick() {
               <el-option v-for="l in g.items" :key="l.code" :label="l.code + (l.note ? ` · ${l.note}` : '')" :value="l.code" />
             </el-option-group>
           </el-select>
-          <el-select v-else v-model="quick.location" filterable placeholder="选择有货库位" style="flex: 1; min-width: 0">
+          <el-select v-else v-model="quick.location" filterable :placeholder="quick.kind === 'out' ? '选择有货库位（小区域，可跨批出库）' : '选择有货库位'" style="flex: 1; min-width: 0">
             <el-option-group v-for="g in occupiedByZone" :key="g.zone" :label="g.zone">
               <el-option
                 v-for="l in g.items"
@@ -736,6 +808,15 @@ async function submitQuick() {
         <div v-if="quick.kind === 'in'" class="muted" style="width: 100%">
           批次号将记为 <b>{{ previewBatch || '—' }}</b>（按操作时间自动生成）
         </div>
+        <el-select v-if="quick.kind === 'out'" v-model="quick.batch" placeholder="默认自动·先进先出（可跨批，推荐）" style="width: 100%">
+          <el-option key="__auto" label="自动 · 先进先出（可跨批，推荐）" value="" />
+          <el-option
+            v-for="b in outBatchChoices"
+            :key="b.batch"
+            :label="`${b.batch} · 余 ${b.qty} 件 · 停放 ${b.days} 天`"
+            :value="b.batch"
+          />
+        </el-select>
         <el-select v-else v-model="quick.batch" placeholder="选哪批就动哪批；默认已选停放最久(先进先出)" style="width: 100%">
           <el-option
             v-for="b in batchOptions"
@@ -751,7 +832,7 @@ async function submitQuick() {
           :max="quick.kind === 'in' ? 1000000 : Math.max(1, available)"
           :step="1" step-strictly controls-position="right" style="width: 160px"
         />
-        <span class="muted" style="margin-left: 10px">件<span v-if="quick.kind !== 'in' && quick.batch">；现有 {{ available }} 件，出库/转移超出会被拒绝</span></span>
+        <span class="muted" style="margin-left: 10px">件<span v-if="quick.kind !== 'in' && quick.product">{{ quick.kind === 'out' && !quick.batch ? `；该库位现有 ${available} 件，可跨批一次出库` : `；该批现有 ${available} 件` }}，超出会被拒绝</span></span>
       </el-form-item>
       <el-form-item label="录入人">
         <el-autocomplete
@@ -775,6 +856,16 @@ async function submitQuick() {
           <el-button type="primary" :loading="quickSubmitting" @click="submitQuick()">记入台账</el-button>
         </div>
       </template>
+    </el-dialog>
+
+    <el-dialog v-model="scanKindVisible" title="扫码 · 选择操作" width="360px" destroy-on-close>
+      <div class="scan-kind-grid">
+        <el-button type="success" plain @click="chooseScanKind('in')">入&nbsp;库</el-button>
+        <el-button type="danger" plain @click="chooseScanKind('out')">出&nbsp;库</el-button>
+        <el-button type="warning" plain @click="chooseScanKind('move')">转&nbsp;移</el-button>
+        <el-button type="info" plain @click="chooseScanKind('query')">查&nbsp;询</el-button>
+      </div>
+      <div class="muted scan-kind-hint">入库/出库/转移：选类型后连续扫码自动填表；查询：扫库位码看明细、扫产品码查库存</div>
     </el-dialog>
 
     <el-dialog v-model="queryVisible" title="产品查询 · 排产库存速查" width="720px" destroy-on-close>

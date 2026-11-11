@@ -443,6 +443,11 @@ body {
 .scan-field .el-autocomplete,
 .scan-field .el-input { flex: 1; min-width: 0; }
 
+/* 主扫码按钮的类型选择弹窗：2×2 大按钮 + 底部说明 */
+.scan-kind-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+.scan-kind-grid .el-button { width: 100%; height: 52px; font-size: 17px; margin: 0; }
+.scan-kind-hint { font-size: 12px; line-height: 1.6; }
+
 /* ===== 库位二维码标签页（全屏覆盖；打印时只输出标签） ===== */
 .label-sheet-overlay {
     position: fixed;
