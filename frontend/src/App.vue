@@ -5,6 +5,7 @@ import Board from './views/Board.vue'
 import SettingsView from './views/Settings.vue'
 import Doc from './views/Doc.vue'
 import Pda from './views/Pda.vue'
+import TestCodes from './views/TestCodes.vue'
 
 const tabs = [
   { key: 'board', label: '看板' },
@@ -12,15 +13,26 @@ const tabs = [
   { key: 'pda', label: 'PDA录入' },
   { key: 'doc', label: '操作指导' },
 ]
-// #pda 直达 PDA 扫码录入页（PDA 浏览器首页/书签配 http://内网IP:8792/#pda）
-const tabFromHash = () => (location.hash.replace('#', '').startsWith('pda') ? 'pda' : null)
-const tab = ref(tabFromHash() ?? 'board')
+// #pda 直达 PDA 扫码录入页（PDA 浏览器首页/书签配 http://内网IP:8792/#pda）；#testcodes 直达扫码测试码页（设置页有入口，不在顶部导航）
+const HASH_TABS = ['pda', 'testcodes'] as const
+const tabFromHash = () => {
+  const h = location.hash.replace('#', '')
+  return HASH_TABS.find((k) => h.startsWith(k)) ?? null
+}
+const tab = ref<string>(tabFromHash() ?? 'board')
 watch(tab, (t) => {
-  if (t === 'pda' && !location.hash.startsWith('#pda')) history.replaceState(null, '', '#pda')
-  else if (t !== 'pda' && location.hash.startsWith('#pda')) history.replaceState(null, '', location.pathname + location.search)
+  const cur = tabFromHash()
+  if ((HASH_TABS as readonly string[]).includes(t)) {
+    if (cur !== t) history.replaceState(null, '', '#' + t)
+  } else if (cur) history.replaceState(null, '', location.pathname + location.search)
 })
 const onHash = () => {
   const t = tabFromHash()
+  if (t) tab.value = t
+}
+// 页面内切换页签（如设置页「扫码测试码」入口、测试码页「返回设置」）
+const onTabEvent = (e: Event) => {
+  const t = (e as CustomEvent<string>).detail
   if (t) tab.value = t
 }
 
@@ -67,18 +79,20 @@ onMounted(() => {
   // 看板「同步最新数据」完成后立即刷新顶栏时间
   window.addEventListener('zz:synced', loadMeta)
   window.addEventListener('hashchange', onHash)
+  window.addEventListener('zz:tab', onTabEvent)
 })
 onUnmounted(() => {
   if (timer) clearInterval(timer)
   window.removeEventListener('zz:synced', loadMeta)
   window.removeEventListener('hashchange', onHash)
+  window.removeEventListener('zz:tab', onTabEvent)
 })
 </script>
 
 <template>
   <header class="app-header">
     <div class="brand">白区库存管理 <span class="sub">· 库位看板</span></div>
-    <template v-if="tab !== 'pda'">
+    <template v-if="tab !== 'pda' && tab !== 'testcodes'">
     <span class="zone-parking-legend-chip legend-green">正常（&lt; {{ settings.yellowDays }} 天）</span>
     <span class="zone-parking-legend-chip legend-yellow">预警（≥ {{ settings.yellowDays }} 天）</span>
     <span class="zone-parking-legend-chip legend-red">严重（≥ {{ settings.redDays }} 天）</span>
@@ -96,6 +110,7 @@ onUnmounted(() => {
     <Board v-if="tab === 'board'" />
     <SettingsView v-else-if="tab === 'settings'" />
     <Pda v-else-if="tab === 'pda'" />
+    <TestCodes v-else-if="tab === 'testcodes'" />
     <Doc v-else />
   </main>
 </template>

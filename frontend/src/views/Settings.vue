@@ -206,6 +206,10 @@ function closeLabels() {
   document.body.classList.remove('zz-label-printing')
 }
 
+function openTestCodes() {
+  window.dispatchEvent(new CustomEvent('zz:tab', { detail: 'testcodes' }))
+}
+
 function printLabels() {
   window.print()
 }
@@ -281,6 +285,10 @@ onMounted(() => {
     <div class="toolbar">
       <el-button type="primary" plain :icon="Printer" @click="openLabels">生成库位二维码标签</el-button>
       <span class="muted">生成全部已启用库位的二维码标签页，打印裁开后贴到现场库位；手机钉钉里扫一下即开该库位明细。</span>
+    </div>
+    <div class="toolbar">
+      <el-button type="success" plain @click="openTestCodes">扫码测试码</el-button>
+      <span class="muted">在电脑屏幕上显示库位码 / MO 码大二维码（对照表为空可一键导入样例），另一台手机打开 https://电脑IP:HTTPS端口/#pda 用摄像头扫屏幕测试。也可直接打开 /#testcodes。</span>
     </div>
   </div>
 
