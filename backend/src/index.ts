@@ -1,6 +1,6 @@
-import os from 'node:os'
 import path from 'node:path'
 import fs from 'node:fs'
+import https from 'node:https'
 import express, { type Request, type Response } from 'express'
 import cors from 'cors'
 import compression from 'compression'
@@ -23,8 +23,11 @@ import { boardFromState, buildBoard, fifoTake, replayState } from './compute'
 import { readProductOptions } from './dingtalk'
 import { configState, getUserByAuthCode, issueUserToken, readConfig, readOptions, readStatus, recordSyncError, signJsapi, syncFromDingtalk, verifyUserToken, writeConfig, writeTxnToDingtalk } from './dingtalk'
 import { saveMap } from './dingtalk'
+import { lanIPv4, loadOrCreateCert } from './cert'
 
 const PORT = Number(process.env.PORT || 8792)
+/** 可选 HTTPS 端口（0 = 不启用） */
+const HTTPS_PORT = Number(process.env.HTTPS_PORT || 0)
 const app = express()
 app.use(cors())
 app.use(compression())
@@ -384,6 +387,11 @@ app.post('/api/day', (req: Request, res: Response) => {
 })
 
 /** 看板（流水重放的当前状态） */
+/** 服务地址信息：前端提示手机用 https 地址打开（摄像头扫码） */
+app.get('/api/server-info', (_req: Request, res: Response) => {
+  res.json({ httpPort: PORT, httpsPort: HTTPS_PORT || null, lan: lanIPv4() })
+})
+
 app.get('/api/state', (_req: Request, res: Response) => {
   const board = buildBoard(readLedger(), readSettings(), readLocations())
   res.json({ empty: readLedger().length === 0, settings: readSettings(), board })
@@ -809,13 +817,22 @@ if (fs.existsSync(PUBLIC_DIR)) {
 restartAutoSync()
 
 app.listen(PORT, '0.0.0.0', () => {
-  const nets = os.networkInterfaces()
-  const lan: string[] = []
-  for (const list of Object.values(nets)) {
-    for (const n of list ?? []) {
-      if (n.family === 'IPv4' && !n.internal) lan.push(n.address)
-    }
-  }
+  const lan = lanIPv4()
   console.log(`[白区库存管理] 服务已启动: http://localhost:${PORT}`)
   for (const ip of lan) console.log(`[白区库存管理] 局域网访问: http://${ip}:${PORT}`)
 })
+
+// 可选 HTTPS（手机浏览器摄像头扫码需要安全上下文）：设置 HTTPS_PORT 时额外启动，同一个 app
+if (HTTPS_PORT) {
+  try {
+    const c = loadOrCreateCert(DATA_DIR)
+    if (c.generated) console.log(`[白区库存管理] 已自动生成自签 HTTPS 证书: ${c.dir}`)
+    else console.log(`[白区库存管理] 使用 HTTPS 证书: ${c.dir}`)
+    https.createServer({ key: c.key, cert: c.cert }, app).listen(HTTPS_PORT, '0.0.0.0', () => {
+      console.log(`[白区库存管理] HTTPS 已启动: https://localhost:${HTTPS_PORT}`)
+      for (const ip of lanIPv4()) console.log(`[白区库存管理] 局域网 HTTPS（手机摄像头扫码用）: https://${ip}:${HTTPS_PORT}/#pda`)
+    })
+  } catch (e) {
+    console.error(`[白区库存管理] HTTPS 启动失败（HTTP 不受影响）: ${(e as Error).message}`)
+  }
+}

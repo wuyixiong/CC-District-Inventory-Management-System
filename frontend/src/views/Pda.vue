@@ -1,12 +1,16 @@
 <script setup lang="ts">
 /**
  * PDA 扫码录入（第一期）：硬件扫码头 = 键盘输入 + 回车。
+ * 无扫码头时可用手机摄像头扫码（需 https），识别结果与键盘输入走完全相同的处理。
  * 扫库位码填库位（转移时第二个库位码 = 目标库位），连续扫 MO 码按图号分组计数，一键提交（每个图号一笔，带 moCodes + requestId）。
  */
-import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import dayjs from 'dayjs'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
+
+// 摄像头扫码组件按需加载（含 html5-qrcode），不拖慢首屏
+const CameraScanner = defineAsyncComponent(() => import('../components/CameraScanner.vue'))
 
 type Kind = 'in' | 'out' | 'move'
 interface MoInfo {
@@ -149,6 +153,10 @@ const queue: string[] = []
 function onEnter() {
   const text = scanText.value.trim()
   scanText.value = ''
+  acceptCode(text)
+}
+/** 键盘/扫码头与摄像头共用的入口 */
+function acceptCode(text: string) {
   if (!text) return
   if (pickVisible.value) return say('warning', '请先在弹窗中确定图号，期间的扫码无效，请重扫')
   queue.push(text)
@@ -173,6 +181,31 @@ async function handleScan(text: string) {
   } catch (e) {
     say('error', `解析失败：${(e as Error).message}`)
   }
+}
+
+/* ===== 手机摄像头扫码 ===== */
+const camOn = ref(false)
+async function toggleCamera() {
+  if (camOn.value) {
+    camOn.value = false
+    return focusInput()
+  }
+  if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+    const info = await api<{ httpsPort: number | null }>('/api/server-info').catch(() => null)
+    const how = info?.httpsPort
+      ? `请改用 https 地址打开：\nhttps://${window.location.hostname}:${info.httpsPort}/#pda`
+      : `服务当前未开启 HTTPS。请让管理员设置 HTTPS_PORT 后重启服务，再用 https 地址打开，例如：\nhttps://${window.location.hostname}:<HTTPS端口>/#pda`
+    ElMessageBox.alert(
+      `浏览器只允许在 https 安全连接下使用摄像头，当前地址是 http，无法调用摄像头。\n\n${how}\n\n首次打开会提示证书不安全，点「高级 → 继续访问」（iPhone：显示详细信息 → 访问此网站），再允许使用摄像头。`,
+      '需用 https 地址打开',
+      { confirmButtonText: '知道了', customStyle: { whiteSpace: 'pre-line' } },
+    ).catch(() => undefined)
+    return
+  }
+  camOn.value = true
+}
+function onCameraScan(text: string) {
+  acceptCode(text)
 }
 
 function onLocation(r: Resolve) {
@@ -399,6 +432,9 @@ async function submit() {
       <button class="pda-kb" :class="{ on: keyboard }" title="手动输入" @click="keyboard = !keyboard; focusInput()">⌨</button>
     </div>
 
+    <button class="pda-cam" :class="{ on: camOn }" @click="toggleCamera">{{ camOn ? '■ 停止摄像头扫码' : '📷 摄像头扫码' }}</button>
+    <CameraScanner v-if="camOn" :paused="pickVisible" @scan="onCameraScan" @close="toggleCamera" />
+
     <div class="pda-msg" :class="'pda-msg-' + lastMsg.type">{{ lastMsg.text }}</div>
 
     <div class="pda-list">
@@ -480,6 +516,11 @@ async function submit() {
 }
 .pda-input:focus { box-shadow: 0 0 0 4px rgba(64, 158, 255, 0.25); }
 .pda-kb { width: 60px; font-size: 24px; border-radius: 10px; border: 2px solid #dcdfe6; background: #fff; cursor: pointer; }
+.pda-cam {
+  height: 60px; font-size: 22px; font-weight: 700; border-radius: 10px; cursor: pointer;
+  border: 2px solid #409eff; background: #ecf5ff; color: #337ecc;
+}
+.pda-cam.on { background: #e05a4f; border-color: #e05a4f; color: #fff; }
 .pda-kb.on { border-color: #409eff; background: #ecf5ff; }
 .pda-msg { padding: 12px 14px; border-radius: 10px; font-size: 18px; line-height: 1.4; word-break: break-all; }
 .pda-msg-info { background: #f4f4f5; color: #606266; }
