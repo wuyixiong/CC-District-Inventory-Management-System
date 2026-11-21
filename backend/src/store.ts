@@ -55,6 +55,8 @@ export interface TxnEvent {
   source?: 'dingtalk' // 录入来源（缺省 = 网页端记一笔）
   sourceId?: string // 来源记录ID（钉钉行ID，同步去重用）
   groupId?: string // 跨批拆分组ID（网页端一笔跨批出库拆出的多条事件共用，便于追溯）
+  moCodes?: string[] // 本笔涉及的 MES 模号唯一码（一码一件，PDA 扫码录入；件数 = 码数）
+  requestId?: string // 客户端请求ID（幂等：重复提交返回首次结果）
 }
 
 export type LedgerEvent = DayEvent | TxnEvent | MirrorEvent
@@ -69,6 +71,7 @@ export interface LocationItem {
 export interface Settings {
   yellowDays: number
   redDays: number
+  moPattern: string // MES 模号唯一码正则（PDA 扫码识别 MO 码），默认 ^MO\d{12}$
 }
 
 export const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), 'data')
@@ -76,7 +79,7 @@ const LEDGER = path.join(DATA_DIR, 'snapshots.jsonl')
 const LOC_FILE = path.join(DATA_DIR, 'locations.json')
 const SET_FILE = path.join(DATA_DIR, 'settings.json')
 
-export const DEFAULT_SETTINGS: Settings = { yellowDays: 3, redDays: 5 }
+export const DEFAULT_SETTINGS: Settings = { yellowDays: 3, redDays: 5, moPattern: '^MO\\d{12}$' }
 
 export function readLedger(): LedgerEvent[] {
   if (!fs.existsSync(LEDGER)) return []
@@ -130,6 +133,8 @@ export function appendTxnEvent(t: {
   source?: 'dingtalk'
   sourceId?: string
   groupId?: string
+  moCodes?: string[]
+  requestId?: string
 }): TxnEvent {
   const ev: TxnEvent = {
     seq: nextSeq(),
@@ -147,6 +152,8 @@ export function appendTxnEvent(t: {
     source: t.source,
     sourceId: t.sourceId,
     groupId: t.groupId,
+    moCodes: t.moCodes && t.moCodes.length ? t.moCodes : undefined,
+    requestId: t.requestId,
   }
   fs.mkdirSync(DATA_DIR, { recursive: true })
   fs.appendFileSync(LEDGER, JSON.stringify(ev) + '\n', 'utf8')
@@ -213,6 +220,7 @@ export function readSettings(): Settings {
     return {
       yellowDays: clampInt(s.yellowDays, DEFAULT_SETTINGS.yellowDays, 1, 365),
       redDays: clampInt(s.redDays, DEFAULT_SETTINGS.redDays, 1, 365),
+      moPattern: typeof s.moPattern === 'string' && s.moPattern.trim() ? s.moPattern.trim() : DEFAULT_SETTINGS.moPattern,
     }
   } catch {
     return { ...DEFAULT_SETTINGS }

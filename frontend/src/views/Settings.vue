@@ -4,9 +4,9 @@ import { ElMessage } from 'element-plus'
 import { Printer } from '@element-plus/icons-vue'
 import QRCode from 'qrcode'
 import { api } from '../api'
-import type { AuditEvent, DingtalkConfig, DingtalkStatus, LocationItem, Settings, SyncReport } from '../types'
+import type { AuditEvent, DingtalkConfig, DingtalkStatus, LocationItem, MoImportResult, MoMapItem, Settings, SyncReport } from '../types'
 
-const settings = reactive<Settings>({ yellowDays: 3, redDays: 5 })
+const settings = reactive<Settings>({ yellowDays: 3, redDays: 5, moPattern: '^MO\\d{12}$' })
 const locs = ref<LocationItem[]>([])
 const audit = ref<AuditEvent[]>([])
 
@@ -116,6 +116,74 @@ async function bulkImport() {
   }
 }
 
+/* ===== MES 清单导入（第一期 PDA 扫码：模号唯一码 → 物料/图号对照表） ===== */
+const mesText = ref('')
+const mesImporting = ref(false)
+const mesResult = ref<MoImportResult | null>(null)
+const mesFile = ref<HTMLInputElement | null>(null)
+const moQuery = ref('')
+const moRows = ref<MoMapItem[]>([])
+const moTotal = ref(0)
+const moMatched = ref(0)
+
+async function importMes(body: BodyInit, contentType: string) {
+  mesImporting.value = true
+  try {
+    const res = await fetch('/api/momap/import', { method: 'POST', headers: { 'Content-Type': contentType }, body })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(data.message || `导入失败（${res.status}）`)
+    mesResult.value = data as MoImportResult
+    const r = mesResult.value
+    ElMessage.success(`导入完成：新增 ${r.added}、更新 ${r.updated}、未变 ${r.unchanged}、跳过 ${r.skipped}（对照表共 ${r.mapSize} 条）`)
+    searchMo()
+  } catch (e) {
+    ElMessage.error((e as Error).message)
+  } finally {
+    mesImporting.value = false
+  }
+}
+function importMesText() {
+  if (!mesText.value.trim()) return ElMessage.warning('请先粘贴 MES 导出清单（含表头行）')
+  importMes(JSON.stringify({ text: mesText.value }), 'application/json').then(() => {
+    if (mesResult.value) mesText.value = ''
+  })
+}
+async function onMesFile(ev: Event) {
+  const input = ev.target as HTMLInputElement
+  const f = input.files?.[0]
+  input.value = ''
+  if (!f) return
+  if (!/\.xlsx$/i.test(f.name)) return ElMessage.warning('仅支持 .xlsx（旧版 .xls 请先另存为 .xlsx）')
+  await importMes(await f.arrayBuffer(), 'application/octet-stream')
+}
+async function searchMo() {
+  try {
+    const r = await api<{ total: number; matched: number; items: MoMapItem[] }>(`/api/momap?q=${encodeURIComponent(moQuery.value.trim())}&limit=50`)
+    moRows.value = r.items
+    moTotal.value = r.total
+    moMatched.value = r.matched
+  } catch (e) {
+    ElMessage.error((e as Error).message)
+  }
+}
+async function saveMoRow(row: MoMapItem) {
+  try {
+    await api(`/api/momap/${encodeURIComponent(row.code)}`, { method: 'PUT', body: JSON.stringify({ drawingNo: row.drawingNo, materialName: row.materialName, moldNo: row.moldNo }) })
+    ElMessage.success(`${row.code} 已修正`)
+  } catch (e) {
+    ElMessage.error((e as Error).message)
+    searchMo()
+  }
+}
+async function saveMoPattern() {
+  try {
+    await api('/api/settings', { method: 'PUT', body: JSON.stringify({ moPattern: settings.moPattern }) })
+    ElMessage.success('MO 码规则已保存')
+  } catch (e) {
+    ElMessage.error((e as Error).message)
+  }
+}
+
 /* ===== 库位二维码标签：生成全部已启用库位的二维码，打印贴现场 ===== */
 const labelSheet = ref(false)
 const labelQrs = ref<Record<string, string>>({})
@@ -142,7 +210,10 @@ function printLabels() {
   window.print()
 }
 
-onMounted(loadAll)
+onMounted(() => {
+  loadAll()
+  searchMo()
+})
 </script>
 
 <template>
@@ -210,6 +281,65 @@ onMounted(loadAll)
     <div class="toolbar">
       <el-button type="primary" plain :icon="Printer" @click="openLabels">生成库位二维码标签</el-button>
       <span class="muted">生成全部已启用库位的二维码标签页，打印裁开后贴到现场库位；手机钉钉里扫一下即开该库位明细。</span>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>MES 清单导入（PDA 扫码 · 模号唯一码对照表）</h3>
+    <div class="muted" style="margin-bottom: 10px">
+      MES 二维码扫出的是「模号唯一码」（一码一件），这里导入 MES 导出清单建立 码 → 物料编号/名称/图号/模号 对照，PDA 扫码即带出物料信息。
+      按表头名识别列（至少需「模号唯一码」「物料图号」），同码覆盖更新；可直接从 MES/Excel 复制整表（含表头行）粘贴。
+    </div>
+    <div class="toolbar" style="align-items: flex-start">
+      <el-input
+        v-model="mesText"
+        type="textarea"
+        :rows="5"
+        placeholder="粘贴 MES 导出清单（制表符分隔，含表头）：&#10;模号唯一码	年度	月份	…	物料编号	物料名称	物料图号	模号	单据编号	…&#10;MO261121000001	2026	11	…	A000717	左壳体	92056593(6545、6563)	R137	…"
+        style="width: 520px; max-width: 100%"
+      />
+      <div style="display: flex; flex-direction: column; gap: 8px">
+        <el-button type="primary" :loading="mesImporting" @click="importMesText">导入粘贴内容</el-button>
+        <el-button :loading="mesImporting" @click="mesFile?.click()">上传 xlsx</el-button>
+        <input ref="mesFile" type="file" accept=".xlsx" style="display: none" @change="onMesFile" />
+      </div>
+    </div>
+    <el-alert
+      v-if="mesResult" :type="mesResult.skipped ? 'warning' : 'success'" :closable="false" show-icon style="margin-bottom: 10px"
+      :title="`共 ${mesResult.total} 行：新增 ${mesResult.added}、更新 ${mesResult.updated}、未变 ${mesResult.unchanged}、跳过 ${mesResult.skipped}；对照表现有 ${mesResult.mapSize} 条`"
+    >
+      <div v-for="r in mesResult.skippedRows.slice(0, 10)" :key="r.row">第 {{ r.row }} 行 {{ r.code || '（空）' }}：{{ r.reason }}</div>
+    </el-alert>
+
+    <div class="toolbar">
+      <el-input v-model="moQuery" placeholder="查询：MO 码 / 物料编号 / 名称 / 图号 / 模号 / 单据编号" clearable style="width: 360px" @keydown.enter="searchMo" @clear="searchMo" />
+      <el-button @click="searchMo">查询</el-button>
+      <span class="muted">对照表共 {{ moTotal }} 条{{ moQuery ? `，匹配 ${moMatched} 条` : '' }}（最多显示 50 条；图号/名称/模号可直接改，回车保存）</span>
+    </div>
+    <el-table :data="moRows" size="small" border max-height="360">
+      <el-table-column prop="code" label="模号唯一码" width="160" />
+      <el-table-column prop="materialNo" label="物料编号" width="100" />
+      <el-table-column label="物料名称" min-width="120">
+        <template #default="scope"><el-input v-model="scope.row.materialName" size="small" @change="saveMoRow(scope.row)" /></template>
+      </el-table-column>
+      <el-table-column label="物料图号" min-width="170">
+        <template #default="scope"><el-input v-model="scope.row.drawingNo" size="small" @change="saveMoRow(scope.row)" /></template>
+      </el-table-column>
+      <el-table-column label="模号" width="100">
+        <template #default="scope"><el-input v-model="scope.row.moldNo" size="small" @change="saveMoRow(scope.row)" /></template>
+      </el-table-column>
+      <el-table-column prop="docNo" label="单据编号" width="130" />
+      <el-table-column label="在库" width="110">
+        <template #default="scope">{{ scope.row.stock ? scope.row.stock.location : '—' }}</template>
+      </el-table-column>
+    </el-table>
+
+    <el-divider style="margin: 12px 0" />
+    <div class="toolbar">
+      <span>MO 码规则（正则）</span>
+      <el-input v-model="settings.moPattern" style="width: 200px" size="small" />
+      <el-button size="small" type="primary" plain @click="saveMoPattern">保存</el-button>
+      <span class="muted">默认 ^MO\d{12}$（如 MO261121000005）。扫码内容命中库位号 → 库位；符合此规则 → MO 码；其余按产品图号处理。PDA 录入页：<a href="#pda">#pda</a></span>
     </div>
   </div>
 

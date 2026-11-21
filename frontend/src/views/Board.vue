@@ -203,29 +203,79 @@ async function tryScan(): Promise<string> {
   }
 }
 
-// 主扫码：内容命中库位号 → 弹库位明细；否则视为产品图号 → 打开产品查询
+// 扫码解析（后端统一口径）：库位码 / MES 模号唯一码（MO 码）/ 产品码
+interface ScanMo {
+  code: string
+  imported: boolean
+  materialNo: string
+  materialName: string
+  drawingNo: string
+  rawDrawingNo: string
+  moldNo: string
+  docNo: string
+}
+interface ScanResolve {
+  type: 'location' | 'mo' | 'product' | 'unknown'
+  code: string
+  location?: LocationItem
+  mo?: ScanMo
+  stock?: { location: string; product: string; batch: string; inAt: string } | null
+  needPick?: boolean
+  product?: string
+  message?: string
+}
+async function resolveScan(text: string): Promise<ScanResolve | null> {
+  try {
+    return await api<ScanResolve>(`/api/scan/resolve?code=${encodeURIComponent(text)}`)
+  } catch (e) {
+    ElMessage.error(`扫码解析失败：${(e as Error).message}`)
+    return null
+  }
+}
+// 产品查询弹窗顶部的 MO 码信息（扫 MO 码进入时显示）
+const queryMo = ref<(ScanMo & { stock: ScanResolve['stock'] }) | null>(null)
+watch(queryVisible, (v) => {
+  if (!v) queryMo.value = null
+})
+
+// 主扫码：库位码 → 弹库位明细；MO 码 → 打开产品查询（图号）并显示 MO 信息；其他 → 视为产品图号查询
 async function scanAndRoute() {
   const text = await tryScan()
   if (!text) return
-  const code = text.toUpperCase()
-  const hit = board.value?.locations.find((l) => l.code === code)
-  if (hit) return openDetail(hit)
-  const reg = locs.value.find((l) => l.code === code)
-  if (reg) {
-    return openDetail({
-      code: reg.code, zone: reg.zone, note: reg.note,
-      registered: true, enabled: reg.enabled, batches: 0, qty: 0, maxDays: 0, state: 'empty', items: [],
-    })
+  const r = await resolveScan(text)
+  if (!r) return
+  if (r.type === 'location') {
+    const code = r.code
+    const hit = board.value?.locations.find((l) => l.code === code)
+    if (hit) return openDetail(hit)
+    const reg = r.location ?? locs.value.find((l) => l.code === code)
+    if (reg) {
+      return openDetail({
+        code: reg.code, zone: reg.zone, note: reg.note,
+        registered: true, enabled: reg.enabled, batches: 0, qty: 0, maxDays: 0, state: 'empty', items: [],
+      })
+    }
+  }
+  if (r.type === 'unknown') return void ElMessage.warning(r.message || `无法识别：${text}`)
+  loadDtOptions()
+  if (r.type === 'mo' && r.mo) {
+    const drawing = r.stock?.product || r.mo.drawingNo
+    if (!drawing) ElMessage.warning(`MO 码 ${r.mo.code} 未导入 MES 对照表，且不在库：无法确定图号（请到设置页导入 MES 清单）`)
+    queryKeyword.value = drawing
+    queryVisible.value = true
+    queryMo.value = { ...r.mo, stock: r.stock ?? null }
+    return
   }
   queryKeyword.value = text
-  loadDtOptions()
   queryVisible.value = true
 }
 
 // 产品查询弹窗：扫码即输入图号
 async function scanToQuery() {
   const text = await tryScan()
-  if (text) queryKeyword.value = text
+  if (!text) return
+  const drawing = await productOfScan(text)
+  if (drawing) queryKeyword.value = drawing
 }
 
 // 记一笔表单：扫码结果填充（字段旁扫码按钮与「扫码选类型后的连续扫码」共用，填完与手工选择完全等价）
@@ -266,8 +316,22 @@ function fillScanned(field: 'location' | 'target' | 'product', text: string): bo
   return true
 }
 
+// 产品码位置扫到 MO 码：换算成图号（在库的以台账图号为准，否则用 MES 对照表图号）
+async function productOfScan(text: string): Promise<string> {
+  const r = await resolveScan(text)
+  if (r?.type !== 'mo' || !r.mo) return text
+  const drawing = r.stock?.product || r.mo.drawingNo
+  if (!drawing) {
+    ElMessage.warning(`MO 码 ${r.mo.code} 未导入 MES 对照表，无法换算图号（请到设置页导入 MES 清单）`)
+    return ''
+  }
+  ElMessage.info(`MO 码 ${r.mo.code} → 图号 ${drawing}${r.mo.materialName ? '（' + r.mo.materialName + '）' : ''}`)
+  return drawing
+}
+
 async function scanFill(field: 'location' | 'target' | 'product') {
-  const text = await tryScan()
+  let text = await tryScan()
+  if (text && field === 'product') text = await productOfScan(text)
   if (text) fillScanned(field, text)
 }
 
@@ -306,7 +370,8 @@ async function chooseScanKind(kind: 'in' | 'out' | 'move' | 'query') {
   // 连续扫码引导链：任一步取消/失败即中止，表单保持打开，可手动补或用字段旁扫码按钮
   for (const step of scanSteps(kind)) {
     ElMessage.info(step.hint)
-    const text = await tryScan()
+    let text = await tryScan()
+    if (text && step.field === 'product') text = await productOfScan(text)
     if (!text) return
     if (!fillScanned(step.field, text)) return
   }
@@ -880,6 +945,16 @@ async function submitQuick() {
         />
         <el-button class="mobile-only scan-trigger" :icon="Camera" title="扫产品码（条码内容=图号）" @click="scanToQuery()" />
       </div>
+      <el-alert v-if="queryMo" type="info" :closable="false" show-icon style="margin-bottom: 10px">
+        <template #title>
+          MO 码 {{ queryMo.code }}{{ queryMo.imported ? '' : '（未导入 MES 对照表）' }}
+          <template v-if="queryMo.stock"> · 在库：{{ queryMo.stock.location }}（{{ queryMo.stock.inAt }} 入库）</template>
+          <template v-else> · 不在库</template>
+        </template>
+        <div v-if="queryMo.imported">
+          {{ queryMo.materialName }} · 物料编号 {{ queryMo.materialNo }} · 图号 {{ queryMo.drawingNo }}<template v-if="queryMo.rawDrawingNo !== queryMo.drawingNo">（MES：{{ queryMo.rawDrawingNo }}）</template><template v-if="queryMo.moldNo"> · 模号 {{ queryMo.moldNo }}</template>
+        </div>
+      </el-alert>
       <div v-if="queryKeyword && !queryRows.length" class="muted" style="padding: 20px 0; text-align: center">
         白区当前没有「{{ queryKeyword }}」的库存
       </div>

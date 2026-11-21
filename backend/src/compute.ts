@@ -70,7 +70,13 @@ export interface StockItem {
 const timeKeyOf = (e: LedgerEvent): string =>
   e.type === 'txn' ? e.txnAt : e.type === 'day' ? `${e.date} 23:59` : e.at.slice(0, 16).replace('T', ' ')
 
-export function replayState(events: LedgerEvent[]): { state: Map<string, StockItem>; lastEvent: LedgerEvent | null } {
+/** 每个事件应用到库存状态后回调（MO 在库索引等派生状态随台账同步重放） */
+export type ReplayHook = (e: LedgerEvent, state: Map<string, StockItem>) => void
+
+export function replayState(
+  events: LedgerEvent[],
+  hook?: ReplayHook,
+): { state: Map<string, StockItem>; lastEvent: LedgerEvent | null } {
   const eff = effectiveDays(events.filter((e): e is import('./store').DayEvent => e.type === 'day'))
   const datesAsc = [...eff.keys()].sort()
 
@@ -110,6 +116,7 @@ export function replayState(events: LedgerEvent[]): { state: Map<string, StockIt
         else state.set(tkey, { qty: e.qty, since: d })
       }
     }
+    if (hook) hook(e, state)
     const k = timeKeyOf(e)
     if (k >= lastKey) {
       lastKey = k

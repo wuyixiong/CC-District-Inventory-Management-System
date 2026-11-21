@@ -1,16 +1,28 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import dayjs from 'dayjs'
 import Board from './views/Board.vue'
 import SettingsView from './views/Settings.vue'
 import Doc from './views/Doc.vue'
+import Pda from './views/Pda.vue'
 
 const tabs = [
   { key: 'board', label: '看板' },
   { key: 'settings', label: '设置' },
+  { key: 'pda', label: 'PDA录入' },
   { key: 'doc', label: '操作指导' },
 ]
-const tab = ref('board')
+// #pda 直达 PDA 扫码录入页（PDA 浏览器首页/书签配 http://内网IP:8792/#pda）
+const tabFromHash = () => (location.hash.replace('#', '').startsWith('pda') ? 'pda' : null)
+const tab = ref(tabFromHash() ?? 'board')
+watch(tab, (t) => {
+  if (t === 'pda' && !location.hash.startsWith('#pda')) history.replaceState(null, '', '#pda')
+  else if (t !== 'pda' && location.hash.startsWith('#pda')) history.replaceState(null, '', location.pathname + location.search)
+})
+const onHash = () => {
+  const t = tabFromHash()
+  if (t) tab.value = t
+}
 
 const lastText = ref('') // 顶栏时间文本（钉钉模式=同步时间，本地模式=台账最后一笔）
 const lastRaw = ref('')
@@ -54,22 +66,26 @@ onMounted(() => {
   timer = setInterval(loadMeta, 30_000)
   // 看板「同步最新数据」完成后立即刷新顶栏时间
   window.addEventListener('zz:synced', loadMeta)
+  window.addEventListener('hashchange', onHash)
 })
 onUnmounted(() => {
   if (timer) clearInterval(timer)
   window.removeEventListener('zz:synced', loadMeta)
+  window.removeEventListener('hashchange', onHash)
 })
 </script>
 
 <template>
   <header class="app-header">
     <div class="brand">白区库存管理 <span class="sub">· 库位看板</span></div>
+    <template v-if="tab !== 'pda'">
     <span class="zone-parking-legend-chip legend-green">正常（&lt; {{ settings.yellowDays }} 天）</span>
     <span class="zone-parking-legend-chip legend-yellow">预警（≥ {{ settings.yellowDays }} 天）</span>
     <span class="zone-parking-legend-chip legend-red">严重（≥ {{ settings.redDays }} 天）</span>
     <span class="zone-parking-legend-chip legend-empty">空库位</span>
     <span class="zone-parking-legend-chip legend-hint">格内数字 = 批次件数，悬停看明细，点击库位看全部批次</span>
-    <span v-if="lastText" class="sync-status-indicator" :class="{ 'sync-status-stale': isStale }">{{ lastText }}</span>
+    </template>
+    <span v-if="lastText && tab !== 'pda'" class="sync-status-indicator" :class="{ 'sync-status-stale': isStale }">{{ lastText }}</span>
     <nav class="nav">
       <button v-for="t in tabs" :key="t.key" :class="{ active: tab === t.key }" @click="tab = t.key">
         {{ t.label }}
@@ -79,6 +95,7 @@ onUnmounted(() => {
   <main class="app-main">
     <Board v-if="tab === 'board'" />
     <SettingsView v-else-if="tab === 'settings'" />
+    <Pda v-else-if="tab === 'pda'" />
     <Doc v-else />
   </main>
 </template>

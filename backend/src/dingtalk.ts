@@ -607,6 +607,42 @@ export async function readOptions(): Promise<DtOptions> {
   return { products, recorders, productsAvailable: available }
 }
 
+const PRODUCTS_CACHE = path.join(DATA_DIR, 'dt-products.json')
+
+/** 仅取钉钉「产品图号」选项（扫码解析/图号对齐用，轻量：字段缓存 5 分钟，不拉全表）。
+ *  成功时落一份本地缓存；钉钉不可用/未配置时回退到最近一次缓存（离线也能对齐图号）。 */
+let productFailAt = 0
+export async function readProductOptions(): Promise<string[]> {
+  try {
+    // 钉钉刚失败过（网络/限流）1 分钟内直接用缓存，避免每次扫码都卡在重试上
+    if (Date.now() - productFailAt < 60_000) throw new Error('recent failure')
+    const fields = await getFields()
+    const seen = new Set<string>()
+    for (const c of fields['产品图号']?.property?.choices ?? []) {
+      const name = typeof c === 'string' ? c : String(c.name ?? '')
+      if (name) seen.add(name)
+    }
+    const list = [...seen]
+    if (list.length) {
+      try {
+        fs.mkdirSync(DATA_DIR, { recursive: true })
+        fs.writeFileSync(PRODUCTS_CACHE, JSON.stringify(list), 'utf8')
+      } catch {
+        /* 缓存写失败不影响返回 */
+      }
+    }
+    return list
+  } catch (e) {
+    if ((e as Error).message !== 'recent failure' && configState().configured) productFailAt = Date.now()
+    try {
+      const j = JSON.parse(fs.readFileSync(PRODUCTS_CACHE, 'utf8'))
+      return Array.isArray(j) ? j.map(String) : []
+    } catch {
+      return []
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // 反向写入：网页端记一笔 → 钉钉流水表
 // ---------------------------------------------------------------------------
@@ -693,6 +729,7 @@ export interface WebTxnInput {
   recorder: string
   note?: string
   txnAt: string
+  moCodes?: string[] // PDA 扫码的 MO 码：追加到备注（不改钉钉表结构）
 }
 
 /** 把网页端记的一笔写入钉钉流水表；转移拆成 出库+入库 两行（钉钉表无转移选项）。返回创建的行ID。 */
@@ -707,7 +744,7 @@ export async function writeTxnToDingtalk(ev: WebTxnInput): Promise<string[]> {
   if (!locId) throw new Error(`库位 ${ev.location} 不在钉钉表「库位编号」选项中`)
   const prodId = choiceId(fields['产品图号'], ev.product)
   if (!prodId) throw new Error(`产品图号 ${ev.product} 不在钉钉表选项中，请先在钉钉表添加该图号选项`)
-  const remark = `[网页:${ev.recorder}]${ev.note ? ' ' + ev.note : ''}`
+  const remark = `[网页:${ev.recorder}]${ev.note ? ' ' + ev.note : ''}${ev.moCodes?.length ? ' MO:' + ev.moCodes.join(',') : ''}`
   const base: Record<string, unknown> = {
     库位编号: locId,
     产品图号: prodId,

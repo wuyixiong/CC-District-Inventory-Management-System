@@ -4,7 +4,7 @@
  * 若干已出库批次、1 次跨库位转移，另留 3 个空库位。
  * 用法：npm run seed   （台账非空时拒绝执行，防止污染真实数据）
  */
-import { appendTxnEvent, readLedger, readLocations, writeLocations, writeSettings } from './store'
+import { appendTxnEvent, readLedger, readLocations, writeLocations, writeSettings, DEFAULT_SETTINGS } from './store'
 
 function workingDaysBack(n: number): string[] {
   const days: string[] = []
@@ -37,7 +37,7 @@ function main() {
     writeLocations(locs)
     console.log('已写入示例库位 A01-A14 / B01-B14 / C01-C14（可在设置页修改或批量导入真实库位）')
   }
-  writeSettings({ yellowDays: 3, redDays: 5 })
+  writeSettings({ ...DEFAULT_SETTINGS })
 
   const N = 10
   const days = workingDaysBack(N) // days[0] 最早，days[N-1] 今天

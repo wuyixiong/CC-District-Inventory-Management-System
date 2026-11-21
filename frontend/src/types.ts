@@ -34,6 +34,29 @@ export interface Board {
 export interface Settings {
   yellowDays: number
   redDays: number
+  moPattern?: string // MES 模号唯一码正则
+}
+
+export interface MoMapItem {
+  code: string
+  materialNo: string
+  materialName: string
+  drawingNo: string
+  moldNo: string
+  docNo: string
+  importedAt: string
+  manual?: boolean
+  stock: { location: string; product: string; batch: string; inAt: string } | null
+}
+
+export interface MoImportResult {
+  total: number
+  added: number
+  updated: number
+  unchanged: number
+  skipped: number
+  skippedRows: { row: number; code: string; reason: string }[]
+  mapSize: number
 }
 
 export interface LocationItem {
